@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: sllapp
+  sql:
+    init:
+      mode: always
+
+sllapp:
+  storage:
+    directory: ${DATA_DIR:./data}
+
+server:
+  address: 127.0.0.1
+  port: 8080
