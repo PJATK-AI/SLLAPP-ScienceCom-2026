@@ -8,5 +8,11 @@ export default defineConfig({
             formats: ['es'],
             fileName: 'index',
         },
+        rollupOptions: {
+            external: ['@mediapipe/tasks-vision'],
+        },
+    },
+    test: {
+        environment: 'jsdom',
     },
 })
