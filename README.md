@@ -1,4 +1,5 @@
 # SLLAPP-ScienceCom-2026
+
 Sign Language Learning Application for ScienceCom 2026
 
 ## Backend
@@ -16,3 +17,26 @@ The server listens on `http://127.0.0.1:8080`. No endpoints are defined yet.
 The backend creates a local SQLite database for game results at `./data/sllapp.db`,
 relative to its working directory. Set `DATA_DIR` to use a different directory.
 Keep this directory between runs to retain the ranking.
+
+## Frontend
+
+The frontend in `frontend/` is a pnpm + Turborepo monorepo using Vue 3, TypeScript and Vite.
+It requires Node.js 24.15 or newer and pnpm 12.
+
+Add new libraries as folders in `packages/` and depend on them with `"workspace:*"`.
+Turborepo builds dependencies first (`dependsOn: ["^build"]`) and caches results.
+
+In development, Vite and TypeScript load libraries straight from their `src/` through the
+`development` condition in each library's `exports`, so changes show up with HMR and no build step.
+Production builds use the compiled `dist/` output. Give every new library the same `exports` layout.
+
+```powershell
+cd frontend
+pnpm install
+pnpm dev          # start the Vite dev server
+pnpm build        # build all packages
+pnpm test         # run Vitest unit tests in all packages
+pnpm typecheck    # type-check all packages
+pnpm format       # format code with Prettier (format:check only verifies)
+pnpm format:check # verify code with Prettier
+```

@@ -1,0 +1,5 @@
+packages:
+    - apps/*
+    - packages/*
+minimumReleaseAgeExclude:
+    - '@vue/test-utils@2.6.0'
