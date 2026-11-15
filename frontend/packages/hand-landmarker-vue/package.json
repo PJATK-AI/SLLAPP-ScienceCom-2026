@@ -1,0 +1,37 @@
+{
+    "name": "@sllapp/hand-landmarker-vue",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "files": [
+        "dist"
+    ],
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "development": "./src/index.ts",
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "scripts": {
+        "build": "vite build && tsc -p tsconfig.build.json",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@sllapp/hand-landmarker": "workspace:*"
+    },
+    "peerDependencies": {
+        "vue": "^3.5.0"
+    },
+    "devDependencies": {
+        "@vue/test-utils": "^2.6.0",
+        "jsdom": "^31.0.1",
+        "typescript": "~6.0.3",
+        "vite": "^8.3.8",
+        "vitest": "^5.1.0",
+        "vue": "^3.5.45"
+    }
+}

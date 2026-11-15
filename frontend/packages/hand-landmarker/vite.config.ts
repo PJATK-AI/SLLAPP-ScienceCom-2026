@@ -1,5 +1,5 @@
-import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vitest/config'
+import { fileURLToPath, URL } from 'node:url';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
     build: {
@@ -8,5 +8,11 @@ export default defineConfig({
             formats: ['es'],
             fileName: 'index',
         },
+        rollupOptions: {
+            external: ['@mediapipe/tasks-vision'],
+        },
     },
-})
+    test: {
+        environment: 'jsdom',
+    },
+});
