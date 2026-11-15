@@ -11,5 +11,5 @@
         "customConditions": ["development"],
         "noEmit": true
     },
-    "include": ["src"]
+    "include": ["src", "tests"]
 }
