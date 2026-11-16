@@ -3,7 +3,7 @@ import argparse
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import joblib
 import numpy as np
@@ -11,13 +11,15 @@ import sklearn
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GroupKFold, cross_validate
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.model_selection import KFold, cross_validate
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from .config import CV_SPLITS, DEFAULT_CLASSIFIERS, DEFAULT_VARIANT, N_LANDMARKS, RANDOM_SEED
+from .config import (CV_SPLITS, DEFAULT_CLASSIFIERS, DEFAULT_VARIANT, INNER_CV_SPLITS, N_LANDMARKS,
+                     RANDOM_SEED)
 from .preprocessing import (SCALE_METHODS, LandmarkValidationError, preprocess_landmarks,
                             validate_landmarks)
 
@@ -131,16 +133,30 @@ class CVResult:
     f1_macro_std: float
 
 
-def make_folds(groups, n_splits: int = CV_SPLITS):
-    dummy = np.zeros((len(groups), 1))
-    return list(GroupKFold(n_splits=n_splits).split(dummy, groups=groups))
+def make_folds(groups, n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED):
+    """Train/validation folds divided by people.
+
+    ``KFold`` (shuffled with ``seed``) splits the unique subject ids, then every sample goes to
+    the side of its subject. With 12 people and 4 splits each fold trains on 9 people and
+    validates on 3 (75/25), and every person is in validation exactly once.
+    """
+    groups = np.asarray(groups)
+    subjects = np.unique(groups)
+    if not 2 <= n_splits <= len(subjects):
+        raise ValueError("n_splits must be between 2 and the number of people (%d), got %d"
+                         % (len(subjects), n_splits))
+    folds = []
+    for train_s, val_s in KFold(n_splits=n_splits, shuffle=True, random_state=seed).split(subjects):
+        val = np.isin(groups, subjects[val_s])
+        folds.append((np.flatnonzero(~val), np.flatnonzero(val)))
+    return folds
 
 
 def evaluate(X, y, groups, variants: Sequence[str] = tuple(VARIANTS),
              classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
              n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED) -> List[CVResult]:
 
-    folds = make_folds(groups, n_splits)
+    folds = make_folds(groups, n_splits, seed)
     results = []
     for vid in variants:
         variant = get_variant(vid)
@@ -160,6 +176,70 @@ def format_results(results: Sequence[CVResult]) -> str:
         lines.append("| %s | %s | %s | %.3f +/- %.3f | %.3f +/- %.3f |" % (
             r.variant, VARIANTS[r.variant].description, r.classifier,
             r.accuracy_mean, r.accuracy_std, r.f1_macro_mean, r.f1_macro_std))
+    return "\n".join(lines)
+
+
+# nested cross-validation
+
+@dataclass(frozen=True)
+class NestedFoldResult:
+    fold: int
+    test_people: Tuple[int, ...]
+    variant: str
+    classifier: str
+    inner_accuracy: float
+    test_accuracy: float
+    test_f1_macro: float
+
+
+def select_best(X, y, groups, variants: Sequence[str], classifiers: Sequence[str],
+                n_splits: int = INNER_CV_SPLITS, seed: int = RANDOM_SEED) -> CVResult:
+    """Choose the variant x classifier with the highest mean validation accuracy.
+
+    Uses only the rows it is given (in nested CV: the outer training people). Ties keep the
+    first combination in ``variants`` x ``classifiers`` order.
+    """
+    results = evaluate(X, y, groups, variants, classifiers, n_splits, seed)
+    return max(results, key=lambda r: r.accuracy_mean)
+
+
+def nested_evaluate(X, y, groups, variants: Sequence[str] = tuple(VARIANTS),
+                    classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
+                    outer_splits: int = CV_SPLITS, inner_splits: int = INNER_CV_SPLITS,
+                    seed: int = RANDOM_SEED) -> List[NestedFoldResult]:
+    """Unbiased estimate of the whole procedure "compare variants, keep the best one".
+
+    Outer loop: folds divided by people (9 train / 3 test people). For each outer fold, the
+    inner loop runs the variant comparison on the 9 training people only (folds divided by
+    people again), the best combination is refitted on those 9 people and scored once on the
+    3 test people. The test people are never used for selection, scaling or fitting.
+    """
+    X, y, groups = np.asarray(X), np.asarray(y), np.asarray(groups)
+    results = []
+    for i, (train, test) in enumerate(make_folds(groups, outer_splits, seed), start=1):
+        best = select_best(X[train], y[train], groups[train], variants, classifiers,
+                           inner_splits, seed)
+        model = build_pipeline(get_variant(best.variant), best.classifier, seed)
+        pred = model.fit(X[train], y[train]).predict(X[test])
+        results.append(NestedFoldResult(
+            i, tuple(int(p) for p in np.unique(groups[test])), best.variant, best.classifier,
+            best.accuracy_mean, float(accuracy_score(y[test], pred)),
+            float(f1_score(y[test], pred, average="macro"))))
+    return results
+
+
+def format_nested_results(results: Sequence[NestedFoldResult]) -> str:
+    lines = ["| outer fold | test people | chosen variant | chosen classifier | inner val accuracy "
+             "| test accuracy | test macro-F1 |", "|---|---|---|---|---|---|---|"]
+    for r in results:
+        lines.append("| %d | %s | %s | %s | %.3f | %.3f | %.3f |" % (
+            r.fold, ", ".join(map(str, r.test_people)), r.variant, r.classifier,
+            r.inner_accuracy, r.test_accuracy, r.test_f1_macro))
+    acc = np.array([r.test_accuracy for r in results])
+    f1 = np.array([r.test_f1_macro for r in results])
+    lines.append("\nNested CV estimate (test people never used for selection): "
+                 "accuracy %.3f +/- %.3f, macro-F1 %.3f +/- %.3f"
+                 % (acc.mean(), acc.std(), f1.mean(), f1.std()))
     return "\n".join(lines)
 
 
@@ -243,6 +323,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--classifiers", nargs="+", default=list(DEFAULT_CLASSIFIERS),
                         choices=list(CLASSIFIERS))
     parser.add_argument("--splits", type=int, default=CV_SPLITS)
+    parser.add_argument("--nested", action="store_true",
+                        help="nested CV: choose the variant/classifier on the outer training people "
+                             "only and score it on the outer test people")
+    parser.add_argument("--inner-splits", type=int, default=INNER_CV_SPLITS)
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--save", metavar="PATH",
                         help="train VARIANT/CLASSIFIER on all samples and save to PATH (no CV)")
@@ -259,9 +343,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     X, y, groups = samples_to_arrays(samples)
+    if args.nested:
+        n_people = len(np.unique(groups))
+        print("%d samples, %d people, nested CV: %d outer folds, %d inner folds, seed %d\n"
+              % (len(y), n_people, args.splits, args.inner_splits, args.seed))
+        print(format_nested_results(nested_evaluate(X, y, groups, args.variants, args.classifiers,
+                                                    args.splits, args.inner_splits, args.seed)))
+        return 0
     results = evaluate(X, y, groups, args.variants, args.classifiers, args.splits, args.seed)
-    print("%d samples, %d subject-grouped folds, seed %d\n"
-          % (len(y), args.splits, args.seed))
+    n_people = len(np.unique(groups))
+    print("%d samples, %d people, %d folds divided by people "
+          "(%d train / %d validation people per fold), seed %d\n"
+          % (len(y), n_people, args.splits, n_people - n_people // args.splits,
+             n_people // args.splits, args.seed))
     print(format_results(results))
     return 0
 
