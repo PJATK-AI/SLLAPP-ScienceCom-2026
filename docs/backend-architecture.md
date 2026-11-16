@@ -1,8 +1,8 @@
 # Backend architecture
 
-The SLLAPP backend uses Java 21 and Spring Boot. It stores game results in a local
-SQLite database and provides repository methods for saving results and reading
-them in ranking order.
+The SLLAPP backend uses Java 21 and Spring Boot. It manages player sessions over
+WebSocket and validates hand samples. Game results are stored in SQLite and
+exposed through a ranking REST API.
 
 See the [README](../README.md) for local setup and commands.
 
@@ -35,6 +35,23 @@ and closes their current sockets. Incoming messages also check the deadline.
 Tests inject a controllable clock to check exact expiry and ensure that sample
 traffic and reconnects do not extend the session lifetime.
 
+```mermaid
+sequenceDiagram
+    participant Client
+    participant WS as SessionWebSocketHandler
+    participant Sessions as SessionRegistry
+    Client->>WS: create_session (nickname, selectedHand)
+    WS->>Sessions: validate and store player session
+    Sessions-->>WS: GameSession
+    WS-->>Client: game_state (CREATED, sessionId, positionId=null)
+    Client->>WS: hand_sample / no_hand
+    WS->>Sessions: check expiry
+    Note over WS: validate sample and sequence; retain latest sample
+    opt Diagnostic mode
+        WS-->>Client: sample_ack
+    end
+```
+
 ## Ranking HTTP API
 
 `RankingController` serves `GET /api/ranking` and validates the optional limit
@@ -53,11 +70,28 @@ backend/src/
 │   ├── java/pl/pjatk/ai/sllapp/
 │   │   ├── SllappApplication.java
 │   │   ├── config/
-│   │   │   └── SqliteConfiguration.java
+│   │   │   ├── SqliteConfiguration.java
+│   │   │   ├── TimeConfiguration.java
+│   │   │   ├── WebConfiguration.java
+│   │   │   └── WebProperties.java
 │   │   ├── game/
-│   │   │   └── result/
-│   │   │       ├── GameResult.java
-│   │   │       └── GameResultRepository.java
+│   │   │   ├── result/
+│   │   │   │   ├── GameResult.java
+│   │   │   │   └── GameResultRepository.java
+│   │   │   └── session/
+│   │   │       ├── GameSession.java
+│   │   │       ├── NicknamePolicy.java
+│   │   │       ├── SelectedHand.java
+│   │   │       ├── SessionProperties.java
+│   │   │       ├── SessionRegistry.java
+│   │   │       └── websocket/
+│   │   │           ├── GameStateMessage.java
+│   │   │           ├── SampleMessage.java
+│   │   │           ├── SampleMessageValidator.java
+│   │   │           ├── SessionConnection.java
+│   │   │           ├── SessionWebSocketConfiguration.java
+│   │   │           ├── SessionWebSocketHandler.java
+│   │   │           └── SessionWebSocketProperties.java
 │   │   └── ranking/
 │   │       ├── RankingController.java
 │   │       ├── RankingService.java
@@ -68,6 +102,19 @@ backend/src/
 └── test/java/pl/pjatk/ai/sllapp/
     ├── game/result/
     │   └── GameResultRepositoryTest.java
+    ├── game/session/
+    │   ├── MutableClock.java
+    │   ├── NicknamePolicyTest.java
+    │   ├── SessionRegistryTest.java
+    │   └── websocket/
+    │       ├── SampleFixtures.java
+    │       ├── SampleMessageValidatorTest.java
+    │       ├── SessionExpiryTest.java
+    │       ├── SessionOwnershipTest.java
+    │       ├── SessionSamplesTest.java
+    │       ├── SessionWebSocketTest.java
+    │       ├── WebSocketSizeTest.java
+    │       └── WebSocketTestClient.java
     └── ranking/
         └── RankingApiTest.java
 ```
@@ -99,6 +146,12 @@ directory to an absolute path, creates the directory and configures a
 The default database path is `./data/sllapp.db`, relative to the backend process
 working directory. Set `DATA_DIR` to use another directory. Keeping the database
 file preserves saved results across application restarts.
+
+Session and WebSocket settings are bound through `@ConfigurationProperties`.
+Their defaults are declared in `SessionProperties`, `SessionWebSocketProperties`
+and `WebProperties`; see [the configuration table](api.md#websocket-configuration).
+The session registry is local to one application instance and is separate from
+SQLite result storage.
 
 ## Stored result
 

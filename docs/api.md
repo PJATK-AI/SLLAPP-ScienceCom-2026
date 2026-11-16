@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:8080` by default.
 
 Connect to `ws://127.0.0.1:8080/ws` with a plain WebSocket client. The connection
 accepts text JSON objects with a string `type`. Invalid JSON and binary messages
-receive `{"type":"error","code":"INVALID_MESSAGE","message":"..."}`.
+within the transport limit receive an `INVALID_MESSAGE` error.
 Unrecognized types receive `UNKNOWN_TYPE`. These errors keep the socket open.
 
 `sllapp.websocket.max-message-bytes` defaults to 65536 UTF-8 bytes per complete
@@ -19,7 +19,7 @@ Text fragments are assembled by the container before application validation.
 
 `sllapp.web.allowed-origins` controls both `/api/**` CORS and the WebSocket
 handshake. Its defaults are `http://localhost:5173` and `http://127.0.0.1:5173`.
-Clients without an `Origin` header can connect.
+Same-origin requests and clients without an `Origin` header are also accepted.
 
 ### Create a session
 
@@ -29,16 +29,24 @@ After opening `/ws`, send:
 {"type":"create_session","nickname":" Ola ","selectedHand":"RIGHT"}
 ```
 
-The response contains a new UUID and the stored player data:
+Opening the connection alone does not create a player session or send a state.
+The response to `create_session` contains a new UUID and the stored player data:
 
 ```json
-{"type":"game_state","sessionId":"6a386307-3c19-4e3b-90c7-ae405835f825","status":"CREATED","nickname":"Ola","selectedHand":"RIGHT","positionId":null}
+{
+  "type": "game_state",
+  "sessionId": "6a386307-3c19-4e3b-90c7-ae405835f825",
+  "status": "CREATED",
+  "nickname": "Ola",
+  "selectedHand": "RIGHT",
+  "positionId": null
+}
 ```
 
 The nickname is stripped of leading/trailing Java whitespace and must contain
 1–20 Unicode code points, without control or format characters. The configured
 `sllapp.session.blocked-words` list rejects complete letter sequences after NFKC
-normalization and case folding to lowercase. Digits and punctuation separate
+normalization and lowercasing with `Locale.ROOT`. Digits and punctuation separate
 words; substrings within other words are accepted. The default list contains
 common Polish and English profanity. This is a word filter, not full moderation.
 `selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
@@ -59,6 +67,7 @@ Sessions live in memory in one backend process. A restart removes them.
 `sllapp.session.creation-ttl` defaults to `5m` from creation; reconnecting does
 not extend the expiry time. Disconnecting leaves the session available until
 that deadline.
+
 The server checks expiry on incoming messages and scans for expired sessions
 every second. The scan removes expired sessions and closes idle connections
 with code 1008. Samples and reconnections do not renew the deadline.
@@ -77,6 +86,45 @@ exactly 21 `landmarks`. Every point has finite numeric `x`, `y`, `z`; coordinate
 are not restricted to 0–1. Extra hand fields, including nested fields, are
 retained in the latest accepted sample. Either handedness is accepted regardless
 of `selectedHand`. Tracker values `Left`/`Right` must be mapped to `LEFT`/`RIGHT`.
+
+This complete synthetic sample illustrates the format. `score` is optional:
+
+```json
+{
+  "type": "hand_sample",
+  "seq": 0,
+  "positionId": null,
+  "hand": {
+    "handedness": "RIGHT",
+    "score": 0.95,
+    "landmarks": [
+      {"x":0.50,"y":0.70,"z":0.00},
+      {"x":0.48,"y":0.65,"z":-0.01},
+      {"x":0.46,"y":0.60,"z":-0.02},
+      {"x":0.44,"y":0.55,"z":-0.03},
+      {"x":0.42,"y":0.50,"z":-0.04},
+      {"x":0.48,"y":0.52,"z":-0.02},
+      {"x":0.48,"y":0.44,"z":-0.03},
+      {"x":0.48,"y":0.38,"z":-0.04},
+      {"x":0.48,"y":0.32,"z":-0.05},
+      {"x":0.52,"y":0.50,"z":-0.02},
+      {"x":0.52,"y":0.42,"z":-0.03},
+      {"x":0.52,"y":0.36,"z":-0.04},
+      {"x":0.52,"y":0.30,"z":-0.05},
+      {"x":0.56,"y":0.52,"z":-0.02},
+      {"x":0.56,"y":0.44,"z":-0.03},
+      {"x":0.56,"y":0.38,"z":-0.04},
+      {"x":0.56,"y":0.32,"z":-0.05},
+      {"x":0.60,"y":0.55,"z":-0.01},
+      {"x":0.60,"y":0.49,"z":-0.02},
+      {"x":0.60,"y":0.44,"z":-0.03},
+      {"x":0.60,"y":0.39,"z":-0.04}
+    ]
+  }
+}
+```
+
+When no hand is detected, send:
 
 ```json
 {"type":"no_hand","seq":1,"positionId":null}
@@ -97,6 +145,49 @@ fresh valid sample receives an acknowledgement:
 ```
 
 The acknowledgement confirms validation and acceptance of a sample.
+
+### Errors and connection closure
+
+Error messages contain `type`, `code` and `message`. They keep the connection
+open so the client can correct its request:
+
+| Code | Cause |
+| --- | --- |
+| `INVALID_MESSAGE` | Malformed JSON, invalid envelope or binary message |
+| `UNKNOWN_TYPE` | Unrecognized string `type` |
+| `INVALID_SESSION` | Invalid player data or UUID syntax |
+| `SESSION_ALREADY_BOUND` | Another create/resume on a bound socket |
+| `SESSION_REQUIRED` | A sample sent before create/resume |
+| `INVALID_SAMPLE` | Invalid sequence, position or hand data |
+| `MESSAGE_TOO_LARGE` | Text exceeds the application limit but not the hard limit |
+
+| Close code | Cause |
+| --- | --- |
+| `1000` | Another connection resumed the session |
+| `1008` | Session expired, or resume named an unknown/expired session |
+| `1009` | Message exceeds the hard limit |
+| `1011` | Server-side transport error |
+
+### WebSocket configuration
+
+| Spring property | Default | Meaning |
+| --- | --- | --- |
+| `sllapp.session.creation-ttl` | `5m` | Fixed lifetime from session creation; must be positive |
+| `sllapp.session.blocked-words` | PL/EN list in `SessionProperties` | Replacement list of blocked words, containing letters and combining marks |
+| `sllapp.websocket.max-message-bytes` | `65536` | Application limit for text, in UTF-8 bytes |
+| `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
+| `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
+| `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
+
+For example, enable acknowledgements when starting the backend from `backend/`:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--sllapp.websocket.diagnostic-mode=true"
+```
+
+The session cleanup task runs every second. Configuration can also be supplied
+through Spring Boot command-line properties or environment variables, for example
+`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true`.
 
 ## Read the ranking
 

@@ -3,7 +3,7 @@
 <div align="center">
   <h1>SLLAPP · ScienceCom 2026</h1>
   <p>Sign Language Learning Application</p>
-  <p>A Spring Boot ranking API, SQLite result storage and Vue hand-tracking packages.</p>
+  <p>WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand-tracking packages.</p>
   <p>
     <img src="https://img.shields.io/badge/Java-21-ED8B00?style=flat-square" alt="Java 21">
     <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square" alt="Vue 3">
@@ -34,13 +34,14 @@
 SLLAPP is the Sign Language Learning Application project for ScienceCom 2026,
 maintained by PJATK AI.
 
-The backend stores game results and serves an ordered ranking over REST. The
+The backend creates player sessions over WebSocket, validates hand samples,
+stores game results and serves an ordered ranking over REST. The
 frontend workspace contains a Vue application scaffold, a MediaPipe hand tracker
 and its Vue wrapper. The web application displays an interactive counter.
 
 | Component | Technologies |
 | --- | --- |
-| Backend | Java 21, Spring Boot, Spring JDBC, SQLite |
+| Backend | Java 21, Spring Boot, WebSocket, Spring JDBC, SQLite |
 | Frontend | Vue 3, TypeScript, Vite, MediaPipe Hand Landmarker |
 | Build and tests | Maven Wrapper, pnpm, Turborepo, JUnit, Vitest |
 | CI | GitHub Actions |
@@ -84,6 +85,27 @@ Open the local URL printed by Vite.
 
 ## Usage
 
+### Open a WebSocket session
+
+With the backend running, use a browser console on the local Vite page:
+
+```javascript
+const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+socket.onmessage = (event) => console.log(JSON.parse(event.data));
+socket.onopen = () => socket.send(JSON.stringify({
+    type: 'create_session',
+    nickname: 'Ola',
+    selectedHand: 'RIGHT',
+}));
+```
+
+The server responds with `game_state`, a `sessionId`, player data and
+`positionId: null`. The connection accepts `hand_sample` and `no_hand` messages.
+Sessions expire five minutes after creation by default; their data lives in
+memory. A new socket can resume a session and replace its previous connection.
+See the [WebSocket reference](docs/api.md#websocket-transport) for complete
+messages, reconnect behavior, origin settings and optional acknowledgements.
+
 ### Read the ranking
 
 With the backend running, request the top results:
@@ -110,7 +132,7 @@ saved results.
 
 | Path | Contents |
 | --- | --- |
-| `backend/` | Spring Boot application, ranking API and SQLite result storage |
+| `backend/` | Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
 | `frontend/apps/web/` | Vue application scaffold |
 | `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
 | `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
@@ -127,9 +149,10 @@ From `backend/`:
 .\mvnw.cmd -B verify
 ```
 
-On Linux or macOS, use `sh mvnw -B verify`. The tests cover SQLite persistence,
-duplicate-session handling, ranking order and limits, and HTTP responses for valid
-and invalid ranking requests. Storage tests use temporary databases.
+On Linux or macOS, use `sh mvnw -B verify`. The tests cover WebSocket creation,
+reconnects, expiry, concurrent ownership, sample validation and message limits,
+as well as SQLite persistence and ranking HTTP responses. Integration tests use
+random server ports and temporary databases.
 
 ### Frontend commands
 
@@ -156,8 +179,8 @@ formatting, build, type checks and tests on pull requests and pushes to `master`
 
 | Document | Contents |
 | --- | --- |
-| [API reference](docs/api.md) | Ranking requests, responses and validation errors |
-| [Backend architecture](docs/backend-architecture.md) | Packages, result storage, configuration and test coverage |
+| [API reference](docs/api.md) | WebSocket messages, ranking requests, configuration and errors |
+| [Backend architecture](docs/backend-architecture.md) | Packages, session lifecycle, result storage and tests |
 | [Project workflow](docs/WORKFLOW.md) | Issues, branches, commits, validation and pull requests |
 
 Follow the project workflow when contributing. Changes reach `master` through
