@@ -1,4 +1,4 @@
-package pl.pjatk.ai.sllapp.ranking;
+package pl.pjatk.ai.sllapp.config;
 
 import java.io.IOException;
 import java.nio.file.Files;

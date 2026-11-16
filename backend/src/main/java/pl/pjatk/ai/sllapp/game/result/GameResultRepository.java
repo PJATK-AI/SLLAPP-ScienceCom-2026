@@ -1,4 +1,4 @@
-package pl.pjatk.ai.sllapp.ranking;
+package pl.pjatk.ai.sllapp.game.result;
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -9,7 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class ResultRepository {
+public class GameResultRepository {
 
     private static final DateTimeFormatter STORAGE_TIMESTAMP = new DateTimeFormatterBuilder()
             .appendInstant(9)
@@ -17,7 +17,7 @@ public class ResultRepository {
 
     private final JdbcTemplate jdbc;
 
-    public ResultRepository(JdbcTemplate jdbc) {
+    public GameResultRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
