@@ -36,6 +36,9 @@ CV_SPLITS = 4
 INNER_CV_SPLITS = 3
 RANDOM_SEED = 42
 
+#: Where ``python -m model.training --train-final`` writes model.joblib and report.md (git-ignored).
+DEFAULT_ARTIFACTS_DIR = MODEL_DIR / "artifacts"
+
 # Landmark order, identical to MediaPipe Hands (index = position in the file's lists).
 LANDMARK_NAMES: Tuple[str, ...] = (
     "WRIST",

@@ -17,7 +17,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from .config import (CV_SPLITS, DEFAULT_CLASSIFIERS, DEFAULT_VARIANT, INNER_CV_SPLITS, N_LANDMARKS,
+from .config import (CV_SPLITS, DEFAULT_ARTIFACTS_DIR, DEFAULT_CLASSIFIERS, DEFAULT_VARIANT, INNER_CV_SPLITS, N_LANDMARKS,
                      RANDOM_SEED)
 from .preprocessing import (SCALE_METHODS, LandmarkValidationError, preprocess_landmarks,
                             validate_landmarks)
@@ -146,14 +146,15 @@ def make_folds(groups, n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED):
 
 def evaluate(X, y, groups, variants: Sequence[str] = tuple(VARIANTS),
              classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
-             n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED) -> List[CVResult]:
+             n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED,
+             n_jobs: Optional[int] = None) -> List[CVResult]:
     folds = make_folds(groups, n_splits, seed)
     results = []
     for vid in variants:
         variant = get_variant(vid)
         for clf in classifiers:
             scores = cross_validate(build_pipeline(variant, clf, seed), X, y, cv=folds,
-                                    scoring=("accuracy", "f1_macro"))
+                                    scoring=("accuracy", "f1_macro"), n_jobs=n_jobs)
             acc, f1 = scores["test_accuracy"], scores["test_f1_macro"]
             results.append(CVResult(vid, clf, float(acc.mean()), float(acc.std()),
                                     float(f1.mean()), float(f1.std())))
@@ -185,7 +186,10 @@ class NestedFoldResult:
 
 def select_best(X, y, groups, variants: Sequence[str], classifiers: Sequence[str],
                 n_splits: int = INNER_CV_SPLITS, seed: int = RANDOM_SEED) -> CVResult:
-    results = evaluate(X, y, groups, variants, classifiers, n_splits, seed)
+    return best_result(evaluate(X, y, groups, variants, classifiers, n_splits, seed))
+
+
+def best_result(results: Sequence[CVResult]) -> CVResult:
     return max(results, key=lambda r: r.accuracy_mean)
 
 
@@ -287,6 +291,79 @@ def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
     return TrainedModel(data["pipeline"], stored, data["classifier"])
 
 
+# final training
+
+@dataclass
+class FinalRun:
+    model: "TrainedModel"
+    comparison: List[CVResult]
+    nested: List[NestedFoldResult]
+    n_samples: int
+    n_people: int
+    outer_splits: int
+    inner_splits: int
+    seed: int
+
+
+def train_final(samples: Iterable[Any], variants: Sequence[str] = tuple(VARIANTS),
+                classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
+                outer_splits: int = CV_SPLITS, inner_splits: int = INNER_CV_SPLITS,
+                seed: int = RANDOM_SEED, n_jobs: Optional[int] = None) -> FinalRun:
+    X, y, groups = samples_to_arrays(samples)
+    nested = nested_evaluate(X, y, groups, variants, classifiers, outer_splits, inner_splits, seed)
+    comparison = evaluate(X, y, groups, variants, classifiers, outer_splits, seed, n_jobs)
+    best = best_result(comparison)
+    variant = get_variant(best.variant)
+    pipeline = build_pipeline(variant, best.classifier, seed).fit(X, y)
+    return FinalRun(TrainedModel(pipeline, variant, best.classifier), comparison, nested,
+                    len(y), len(np.unique(groups)), outer_splits, inner_splits, seed)
+
+
+def format_report(run: FinalRun) -> str:
+    m = run.model
+    acc = np.array([r.test_accuracy for r in run.nested])
+    f1 = np.array([r.test_f1_macro for r in run.nested])
+    chosen = next(r for r in run.comparison
+                  if (r.variant, r.classifier) == (m.variant.id, m.classifier))
+    return "\n".join([
+        "# Model training report",
+        "",
+        "- Data: %d samples, %d people, %d letters" % (run.n_samples, run.n_people, len(m.classes)),
+        "- Candidates: %d variants x %d classifiers"
+        % (len({r.variant for r in run.comparison}), len({r.classifier for r in run.comparison})),
+        "- Folds: KFold over people, %d outer / %d inner splits, seed %d"
+        % (run.outer_splits, run.inner_splits, run.seed),
+        "- scikit-learn %s" % sklearn.__version__,
+        "",
+        "## Final model",
+        "",
+        "- Variant: %s (%s)" % (m.variant.id, m.variant.description),
+        "- Classifier: %s" % m.classifier,
+        "- Validation accuracy in the comparison: %.3f +/- %.3f (optimistic: used for the choice)"
+        % (chosen.accuracy_mean, chosen.accuracy_std),
+        "- Expected accuracy on new people (nested CV): %.3f +/- %.3f, macro-F1 %.3f +/- %.3f"
+        % (acc.mean(), acc.std(), f1.mean(), f1.std()),
+        "- Trained on all %d samples." % run.n_samples,
+        "",
+        "## Nested cross-validation",
+        "",
+        format_nested_results(run.nested),
+        "",
+        "## Comparison on all people",
+        "",
+        format_results(run.comparison),
+        "",
+    ])
+
+
+def write_final_run(run: FinalRun, out_dir) -> Tuple[Path, Path]:
+    out_dir = Path(out_dir)
+    model_path = run.model.save(out_dir / "model.joblib")
+    report_path = out_dir / "report.md"
+    report_path.write_text(format_report(run), encoding="utf-8")
+    return model_path, report_path
+
+
 # CLI
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -303,6 +380,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "only and score it on the outer test people")
     parser.add_argument("--inner-splits", type=int, default=INNER_CV_SPLITS)
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    parser.add_argument("--train-final", metavar="DIR", nargs="?", const=str(DEFAULT_ARTIFACTS_DIR),
+                        help="choose the best variant/classifier, estimate it with nested CV, train "
+                             "it on all samples and write model.joblib + report.md to DIR "
+                             "(default: %(const)s)")
     parser.add_argument("--save", metavar="PATH",
                         help="train VARIANT/CLASSIFIER on all samples and save to PATH (no CV)")
     parser.add_argument("--variant", default=DEFAULT_VARIANT, choices=list(VARIANTS))
@@ -311,6 +392,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     from .dataset import load_dataset
     samples = load_dataset(args.dataset)
+
+    if args.train_final:
+        run = train_final(samples, args.variants, args.classifiers, args.splits,
+                          args.inner_splits, args.seed, n_jobs=-1)
+        model_path, report_path = write_final_run(run, args.train_final)
+        print(format_report(run))
+        print("saved %s and %s" % (model_path, report_path))
+        return 0
 
     if args.save:
         model = train_model(samples, args.variant, args.classifier, args.seed)

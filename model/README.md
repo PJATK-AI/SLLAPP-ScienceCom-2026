@@ -172,6 +172,23 @@ python -m model.training --nested
 The output lists the choice and test score of each outer fold and the mean +/- std over the 4 folds.
 That mean estimates the whole procedure "compare the variants and keep the best", not one fixed variant.
 
+### Train the final model
+
+```
+python -m model.training --train-final            # writes to model/artifacts/
+python -m model.training --train-final path/to/dir
+```
+
+This runs the whole procedure on the 6 variants x 4 classifiers:
+
+1. nested cross-validation gives the expected accuracy on new people;
+2. the comparison on all 12 people (4 folds by people) chooses the variant and classifier with the
+   same rule as the inner loop (highest mean validation accuracy);
+3. the chosen pipeline is trained on all 960 samples.
+
+It writes `model.joblib` (load it with `load_model`) and `report.md` (the choice, the nested CV
+estimate and both tables). `model/artifacts/` is in `.gitignore`: do not commit model files.
+
 Train one variant on all samples and save it for inference (do not commit model files):
 
 ```
