@@ -59,6 +59,41 @@ Sessions live in memory in one backend process. A restart removes them.
 not extend the expiry time. Disconnecting leaves the session available until
 that deadline.
 
+### Send hand samples
+
+Both sample types require a bound session, an integer `seq` from 0 to
+9007199254740991 and an explicit `positionId: null`. Copy `positionId` from
+the latest `game_state`; the implemented `CREATED` state uses null. A missing
+or non-null position is invalid. Sequence numbers increase across both types;
+gaps are allowed. Reconnecting starts a new sequence. Valid messages with an
+old or duplicate sequence are ignored. Invalid messages do not consume it.
+
+`hand_sample` contains a `hand` object with `handedness: LEFT` or `RIGHT` and
+exactly 21 `landmarks`. Every point has finite numeric `x`, `y`, `z`; coordinates
+are not restricted to 0–1. Extra hand fields, including nested fields, are
+retained in the latest accepted sample. Either handedness is accepted regardless
+of `selectedHand`. Tracker values `Left`/`Right` must be mapped to `LEFT`/`RIGHT`.
+
+```json
+{"type":"no_hand","seq":1,"positionId":null}
+```
+
+Samples before creating/resuming a session receive `SESSION_REQUIRED`.
+Invalid samples receive an error and the connection stays open, for example:
+
+```json
+{"type":"error","code":"INVALID_SAMPLE","message":"positionId must be null in CREATED state."}
+```
+
+`sllapp.websocket.diagnostic-mode` defaults to `false`. When enabled, every
+fresh valid sample receives an acknowledgement:
+
+```json
+{"type":"sample_ack","seq":1}
+```
+
+The acknowledgement confirms validation and acceptance of a sample.
+
 ## Read the ranking
 
 `GET /api/ranking?limit=N`

@@ -7,6 +7,9 @@ import pl.pjatk.ai.sllapp.game.session.GameSession;
 final class SessionConnection {
     final WebSocketSession socket;
     volatile GameSession game;
+    // Accessed while holding the game session monitor.
+    long lastSeq = -1;
+    SampleMessage lastSample;
 
     SessionConnection(WebSocketSession socket) {
         this.socket = new ConcurrentWebSocketSessionDecorator(socket, 5000, 65536);

@@ -27,14 +27,17 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     private final ObjectReader reader;
     private final SessionWebSocketProperties properties;
     private final SessionRegistry sessions;
+    private final SampleMessageValidator samples;
     private final ConcurrentHashMap<String, SessionConnection> connections = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SessionConnection> owners = new ConcurrentHashMap<>();
 
-    SessionWebSocketHandler(ObjectMapper mapper, SessionWebSocketProperties properties, SessionRegistry sessions) {
+    SessionWebSocketHandler(ObjectMapper mapper, SessionWebSocketProperties properties, SessionRegistry sessions,
+                            SampleMessageValidator samples) {
         this.mapper = mapper;
         this.reader = mapper.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.properties = properties;
         this.sessions = sessions;
+        this.samples = samples;
     }
 
     @Override
@@ -74,7 +77,34 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
         switch (input.path("type").asString()) {
             case "create_session" -> create(connection, input);
             case "resume_session" -> resume(connection, input);
+            case "hand_sample", "no_hand" -> sample(connection, input);
             default -> error(session, "UNKNOWN_TYPE", "Unknown message type.");
+        }
+    }
+
+    private void sample(SessionConnection connection, JsonNode input) throws IOException {
+        var game = connection.game;
+        if (game == null) {
+            error(connection.socket, "SESSION_REQUIRED", "Create or resume a session first.");
+            return;
+        }
+        synchronized (game) {
+            if (owners.get(game.sessionId()) != connection) return;
+            if (!sessions.isActive(game)) {
+                connection.socket.close(CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
+                return;
+            }
+            SampleMessage sample;
+            try {
+                sample = samples.validate(input);
+            } catch (IllegalArgumentException exception) {
+                error(connection.socket, "INVALID_SAMPLE", exception.getMessage());
+                return;
+            }
+            if (sample.seq() <= connection.lastSeq) return;
+            connection.lastSeq = sample.seq();
+            connection.lastSample = sample;
+            if (properties.diagnosticMode()) send(connection.socket, new SampleAckMessage("sample_ack", sample.seq()));
         }
     }
 
@@ -151,4 +181,5 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     private record ErrorMessage(String type, String code, String message) {}
+    private record SampleAckMessage(String type, long seq) {}
 }

@@ -98,6 +98,19 @@ class SessionWebSocketTest {
     }
 
     @Test
+    void disablesSampleAcknowledgementsByDefault() throws Exception {
+        try (var socket = new WebSocketTestClient(client, port, null)) {
+            socket.send("{\"type\":\"create_session\",\"nickname\":\"Ola\",\"selectedHand\":\"LEFT\"}");
+            socket.next();
+            socket.send(SampleFixtures.hand(0));
+            socket.send(SampleFixtures.noHand(1));
+            socket.assertSilent();
+            socket.send("{\"type\":\"unknown\"}");
+            assertThat(socket.next().path("code").asString()).isEqualTo("UNKNOWN_TYPE");
+        }
+    }
+
+    @Test
     void checksOriginsForWebSocketAndRest() throws Exception {
         assertThatThrownBy(() -> new WebSocketTestClient(client, port, "http://untrusted.example"))
                 .hasCauseInstanceOf(WebSocketHandshakeException.class);

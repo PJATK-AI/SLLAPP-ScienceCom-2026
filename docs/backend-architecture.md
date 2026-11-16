@@ -24,6 +24,12 @@ registry keeps Spring sockets separate from player data. Ownership changes are
 serialized per game session. Closing an old socket cannot detach its replacement.
 Outbound messages use `ConcurrentWebSocketSessionDecorator` to serialize sends.
 
+`SampleMessageValidator` validates `hand_sample` and `no_hand`. A `SampleMessage`
+retains the hand JSON, including additional fields. Each `SessionConnection`
+stores only the latest accepted sample and sequence number. Validation precedes
+sequence advancement; ownership and expiry are checked under the session lock.
+Diagnostic acknowledgements are controlled by `SessionWebSocketProperties`.
+
 ## Ranking HTTP API
 
 `RankingController` serves `GET /api/ranking` and validates the optional limit
