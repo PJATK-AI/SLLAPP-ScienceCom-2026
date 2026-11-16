@@ -6,6 +6,15 @@ them in ranking order.
 
 See the [README](../README.md) for local setup and commands.
 
+## WebSocket transport
+
+`game.session.websocket` registers the plain JSON endpoint `/ws`, validates
+message envelopes and reports protocol errors. `SessionWebSocketProperties`
+configures application and container message limits. `config.WebConfiguration`
+and `WebProperties` configure REST CORS and provide the same origin list to
+the WebSocket handshake. `SessionWebSocketTest` checks the running server with
+JDK HTTP and WebSocket clients.
+
 ## Ranking HTTP API
 
 `RankingController` serves `GET /api/ranking` and validates the optional limit
