@@ -143,6 +143,12 @@ row limit as a bound SQL parameter. A limit below 1 causes
 
 ## Test coverage and CI
 
+The WebSocket tests cover creation, nickname validation, resuming, concurrent
+ownership changes, delayed close callbacks, expiry with a controlled clock,
+sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
+UTF-8 size boundaries, fragmented text and oversized binary messages. Integration
+tests use a real embedded server on random ports and temporary SQLite files.
+
 `RankingApiTest` starts the HTTP server on a random port with a temporary SQLite
 database. It checks the empty response, output fields, score and timestamp
 ordering, full ties, rank numbering, default and explicit limits, and invalid

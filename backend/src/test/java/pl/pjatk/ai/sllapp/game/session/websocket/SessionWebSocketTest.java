@@ -111,6 +111,19 @@ class SessionWebSocketTest {
     }
 
     @Test
+    void appliesTheOriginListToRestPreflightRequests() throws Exception {
+        for (String origin : new String[]{"http://localhost:5173", "http://127.0.0.1:5173", "http://untrusted.example"}) {
+            var response = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/ranking"))
+                    .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                    .header("Origin", origin).header("Access-Control-Request-Method", "GET").build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).isEqualTo(origin.equals("http://localhost:5173") ? 200 : 403);
+        }
+        assertThatThrownBy(() -> new WebSocketTestClient(client, port, "http://127.0.0.1:5173"))
+                .hasCauseInstanceOf(WebSocketHandshakeException.class);
+    }
+
+    @Test
     void checksOriginsForWebSocketAndRest() throws Exception {
         assertThatThrownBy(() -> new WebSocketTestClient(client, port, "http://untrusted.example"))
                 .hasCauseInstanceOf(WebSocketHandshakeException.class);

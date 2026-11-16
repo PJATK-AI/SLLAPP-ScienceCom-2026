@@ -1,6 +1,7 @@
 package pl.pjatk.ai.sllapp.game.session.websocket;
 
 import java.net.http.HttpClient;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
@@ -66,6 +67,22 @@ class WebSocketSizeTest {
             }
             socket.send(SampleFixtures.noHand(1));
             assertThat(socket.next().path("seq").asLong()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void keepsConnectionAtHardLimitAndClosesOversizedFragmentsAndBinary() throws Exception {
+        try (var socket = connect()) {
+            socket.send(paddedSample(0, 2048, "Ł"));
+            assertThat(socket.next().path("code").asString()).isEqualTo("MESSAGE_TOO_LARGE");
+            String message = paddedSample(0, 2049, "a");
+            socket.socket.sendText(message.substring(0, 1000), false).get(5, TimeUnit.SECONDS);
+            socket.socket.sendText(message.substring(1000), true).get(5, TimeUnit.SECONDS);
+            assertThat(socket.closed.get(5, TimeUnit.SECONDS)).isEqualTo(1009);
+        }
+        try (var socket = connect()) {
+            socket.socket.sendBinary(ByteBuffer.wrap(new byte[2049]), true).get(5, TimeUnit.SECONDS);
+            assertThat(socket.closed.get(5, TimeUnit.SECONDS)).isEqualTo(1009);
         }
     }
 

@@ -61,6 +61,24 @@ class SessionSamplesTest {
     }
 
     @Test
+    void acceptsMaximumSafeSequenceAfterInvalidValues() throws Exception {
+        try (var socket = new WebSocketTestClient(client, port, "http://127.0.0.1:5173")) {
+            socket.send("{\"type\":\"create_session\",\"nickname\":\"Łucja\",\"selectedHand\":\"RIGHT\"}");
+            socket.next();
+            for (String seq : new String[]{"null", "\"1\"", "-1", "0.5", "9007199254740992"}) {
+                socket.send("{\"type\":\"no_hand\",\"seq\":" + seq + ",\"positionId\":null}");
+                assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SAMPLE");
+            }
+            socket.send(SampleFixtures.hand(0).replace("\"z\":-0.1", "\"z\":1e999"));
+            assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SAMPLE");
+            socket.send(SampleFixtures.noHand(9_007_199_254_740_991L));
+            assertAck(socket, 9_007_199_254_740_991L);
+            socket.send(SampleFixtures.hand(0));
+            socket.assertSilent();
+        }
+    }
+
+    @Test
     void restartsSequenceAfterReplacementAndAfterDisconnect() throws Exception {
         String id;
         try (var first = new WebSocketTestClient(client, port, null);
