@@ -2,6 +2,7 @@ import os
 import random
 import tempfile
 import unittest
+from unittest import mock
 
 try:
     import numpy as np
@@ -128,10 +129,100 @@ class ModelFileTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_SKLEARN and DEFAULT_DATASET_DIR.is_dir(), "SPAS dataset not present")
 class RealDatasetTrainingTests(unittest.TestCase):
-    def test_subject_grouped_folds_cover_all_samples(self):
+    def test_folds_divide_people_75_25(self):
         _, y, groups = samples_to_arrays(load_dataset())
         folds = make_folds(groups)
-        self.assertEqual(sorted(i for _, test in folds for i in test), list(range(len(y))))
+        self.assertEqual(len(folds), 4)
+        val_people = []
+        for train, val in folds:
+            train_p, val_p = set(groups[train]), set(groups[val])
+            self.assertEqual((len(train_p), len(val_p)), (9, 3))
+            self.assertEqual((len(train), len(val)), (720, 240))
+            self.assertFalse(train_p & val_p)
+            val_people += sorted(val_p)
+        self.assertEqual(sorted(val_people), list(range(1, 13)))
+        self.assertEqual(sorted(i for _, val in folds for i in val), list(range(len(y))))
+
+    def test_nested_inner_folds_divide_outer_training_people_6_3(self):
+        _, _, groups = samples_to_arrays(load_dataset())
+        for train, test in make_folds(groups):
+            inner_groups = groups[train]
+            for itrain, ival in make_folds(inner_groups, 3):
+                train_p, val_p = set(inner_groups[itrain]), set(inner_groups[ival])
+                self.assertEqual((len(train_p), len(val_p)), (6, 3))
+                self.assertFalse((train_p | val_p) & set(groups[test]))
+
+
+@unittest.skipUnless(HAVE_SKLEARN, "numpy/scikit-learn not installed")
+class NestedCVTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.X, cls.y, cls.groups = samples_to_arrays(synthetic_samples(subjects=range(1, 9)))
+
+    def run_nested(self):
+        calls = []
+        real = training.select_best
+
+        def spy(X, y, groups, *args, **kwargs):
+            calls.append((len(X), set(np.unique(groups))))
+            return real(X, y, groups, *args, **kwargs)
+
+        with mock.patch.object(training, "select_best", side_effect=spy):
+            results = training.nested_evaluate(self.X, self.y, self.groups, ["V0", "V2"], ["knn"],
+                                               outer_splits=4, inner_splits=3)
+        return results, calls
+
+    def test_selection_never_sees_test_people(self):
+        results, calls = self.run_nested()
+        self.assertEqual(len(results), len(calls), 4)
+        for r, (n_rows, people) in zip(results, calls):
+            self.assertFalse(people & set(r.test_people))
+            self.assertEqual(people | set(r.test_people), set(range(1, 9)))
+            self.assertEqual(n_rows, int(np.isin(self.groups, list(people)).sum()))
+
+    def test_every_person_is_tested_once(self):
+        results, _ = self.run_nested()
+        tested = sorted(p for r in results for p in r.test_people)
+        self.assertEqual(tested, list(range(1, 9)))
+
+    def test_choice_is_one_of_the_candidates(self):
+        results, _ = self.run_nested()
+        for r in results:
+            self.assertIn((r.variant, r.classifier), {("V0", "knn"), ("V2", "knn")})
+            self.assertTrue(0.0 <= r.test_accuracy <= 1.0)
+
+    def test_test_labels_do_not_affect_choice(self):
+        outer = make_folds(self.groups, 4)
+        train, test = outer[0]
+        y_scrambled = self.y.copy()
+        y_scrambled[test] = np.roll(y_scrambled[test], 7)
+        a = training.nested_evaluate(self.X, self.y, self.groups, ["V0", "V2"], ["knn"], 4, 3)[0]
+        b = training.nested_evaluate(self.X, y_scrambled, self.groups, ["V0", "V2"], ["knn"], 4, 3)[0]
+        self.assertEqual((a.variant, a.classifier, a.inner_accuracy),
+                         (b.variant, b.classifier, b.inner_accuracy))
+
+
+@unittest.skipUnless(HAVE_SKLEARN, "numpy/scikit-learn not installed")
+class FoldTests(unittest.TestCase):
+    GROUPS = np.repeat(np.arange(1, 13), 5) if HAVE_SKLEARN else None
+
+    def test_folds_are_reproducible_and_seeded(self):
+        a = make_folds(self.GROUPS, 4, seed=42)
+        b = make_folds(self.GROUPS, 4, seed=42)
+        c = make_folds(self.GROUPS, 4, seed=7)
+        val_people = lambda folds: [sorted(set(self.GROUPS[v])) for _, v in folds]
+        self.assertEqual(val_people(a), val_people(b))
+        self.assertNotEqual(val_people(a), val_people(c))
+
+    def test_people_are_shuffled(self):
+        in_order = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
+        self.assertNotEqual([sorted(set(self.GROUPS[v])) for _, v in make_folds(self.GROUPS)],
+                            in_order)
+
+    def test_invalid_split_count_is_rejected(self):
+        for n in (1, 13):
+            with self.subTest(n=n), self.assertRaises(ValueError):
+                make_folds(self.GROUPS, n)
 
 
 if __name__ == "__main__":
