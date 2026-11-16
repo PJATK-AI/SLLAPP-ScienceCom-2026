@@ -40,3 +40,16 @@ pnpm typecheck    # type-check all packages
 pnpm format       # format code with Prettier (format:check only verifies)
 pnpm format:check # verify code with Prettier
 ```
+
+## AI module
+
+The AI module in `model/` loads and validates the SPAS hand-landmark dataset. It uses only the Python
+standard library (tested with Python 3.13). Run these commands from the repository root:
+
+```powershell
+python -m model                                     # validate the dataset
+python -m unittest discover -s model/tests -t .     # run the tests
+```
+
+See [`model/README.md`](model/README.md) for the dataset location, the landmark order and the
+provenance and license status of the dataset.
