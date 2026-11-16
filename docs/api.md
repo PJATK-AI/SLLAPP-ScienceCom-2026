@@ -58,6 +58,9 @@ Sessions live in memory in one backend process. A restart removes them.
 `sllapp.session.creation-ttl` defaults to `5m` from creation; reconnecting does
 not extend the expiry time. Disconnecting leaves the session available until
 that deadline.
+The server checks expiry on incoming messages and scans for expired sessions
+every second. The scan removes expired sessions and closes idle connections
+with code 1008. Samples and reconnections do not renew the deadline.
 
 ### Send hand samples
 

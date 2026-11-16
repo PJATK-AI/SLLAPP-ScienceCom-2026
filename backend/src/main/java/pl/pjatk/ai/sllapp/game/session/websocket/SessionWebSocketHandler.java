@@ -4,6 +4,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.web.socket.BinaryMessage;
@@ -23,6 +26,7 @@ import tools.jackson.databind.ObjectReader;
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class SessionWebSocketHandler extends AbstractWebSocketHandler {
+    private static final Logger log = LoggerFactory.getLogger(SessionWebSocketHandler.class);
     private final ObjectMapper mapper;
     private final ObjectReader reader;
     private final SessionWebSocketProperties properties;
@@ -57,6 +61,8 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
+        var connection = connections.get(session.getId());
+        if (connection == null || !isUsable(connection)) return;
         if (message.getPayload().getBytes(StandardCharsets.UTF_8).length > properties.maxMessageBytes()) {
             error(session, "MESSAGE_TOO_LARGE", "Message exceeds the application size limit.");
             return;
@@ -72,8 +78,6 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
             error(session, "INVALID_MESSAGE", "Expected one JSON object with a string type.");
             return;
         }
-        var connection = connections.get(session.getId());
-        if (connection == null) return;
         switch (input.path("type").asString()) {
             case "create_session" -> create(connection, input);
             case "resume_session" -> resume(connection, input);
@@ -152,23 +156,66 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     private void bind(SessionConnection connection, GameSession game) throws IOException {
-        SessionConnection previous;
-        synchronized (game) {
-            if (!sessions.isActive(game)) {
-                connection.socket.close(CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
-                return;
+        SessionConnection previous = null;
+        try {
+            synchronized (game) {
+                if (!sessions.isActive(game)) {
+                    connection.socket.close(CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
+                    return;
+                }
+                connection.game = game;
+                if (connections.get(connection.socket.getId()) != connection || !connection.socket.isOpen()) return;
+                previous = owners.put(game.sessionId(), connection);
+                send(connection.socket, GameStateMessage.from(game));
             }
-            connection.game = game;
-            if (connections.get(connection.socket.getId()) != connection || !connection.socket.isOpen()) return;
-            previous = owners.put(game.sessionId(), connection);
-            send(connection.socket, GameStateMessage.from(game));
+        } finally {
+            if (previous != null) closeSafely(previous, CloseStatus.NORMAL.withReason("Connection replaced"));
         }
-        if (previous != null) previous.socket.close(CloseStatus.NORMAL.withReason("Connection replaced"));
     }
 
     @Override
     protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) throws IOException {
-        error(session, "INVALID_MESSAGE", "Expected a text JSON message.");
+        var connection = connections.get(session.getId());
+        if (connection != null && isUsable(connection)) {
+            error(session, "INVALID_MESSAGE", "Expected a text JSON message.");
+        }
+    }
+
+    @Override
+    public void handleTransportError(WebSocketSession session, Throwable exception) {
+        var connection = connections.get(session.getId());
+        if (connection != null) closeSafely(connection, CloseStatus.SERVER_ERROR);
+        afterConnectionClosed(session, CloseStatus.SERVER_ERROR);
+    }
+
+    private boolean isUsable(SessionConnection connection) {
+        var game = connection.game;
+        if (game == null) return true;
+        synchronized (game) {
+            if (owners.get(game.sessionId()) != connection) return false;
+            if (sessions.isActive(game)) return true;
+            closeSafely(connection, CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
+            return false;
+        }
+    }
+
+    @Scheduled(fixedDelay = 1000)
+    void expireSessions() {
+        for (var game : sessions.removeExpired()) {
+            SessionConnection connection;
+            synchronized (game) {
+                connection = owners.remove(game.sessionId());
+            }
+            if (connection != null) closeSafely(connection, CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
+        }
+    }
+
+    private void closeSafely(SessionConnection connection, CloseStatus status) {
+        try {
+            connection.socket.close(status);
+        } catch (IOException exception) {
+            log.warn("Could not close WebSocket {}", connection.socket.getId(), exception);
+        }
     }
 
     private void error(WebSocketSession session, String code, String message) throws IOException {

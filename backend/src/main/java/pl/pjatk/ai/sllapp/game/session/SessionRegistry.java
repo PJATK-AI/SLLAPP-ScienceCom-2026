@@ -1,6 +1,8 @@
 package pl.pjatk.ai.sllapp.game.session;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,5 +38,17 @@ public class SessionRegistry {
 
     public boolean isActive(GameSession session) {
         return clock.instant().isBefore(session.expiresAt()) && sessions.get(session.sessionId()) == session;
+    }
+
+    public List<GameSession> removeExpired() {
+        var expired = new ArrayList<GameSession>();
+        for (var session : sessions.values()) {
+            synchronized (session) {
+                if (!clock.instant().isBefore(session.expiresAt()) && sessions.remove(session.sessionId(), session)) {
+                    expired.add(session);
+                }
+            }
+        }
+        return List.copyOf(expired);
     }
 }

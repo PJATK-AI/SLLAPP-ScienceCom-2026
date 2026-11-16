@@ -30,6 +30,11 @@ stores only the latest accepted sample and sequence number. Validation precedes
 sequence advancement; ownership and expiry are checked under the session lock.
 Diagnostic acknowledgements are controlled by `SessionWebSocketProperties`.
 
+A scheduled task runs every second, removes expired sessions from the registry
+and closes their current sockets. Incoming messages also check the deadline.
+Tests inject a controllable clock to check exact expiry and ensure that sample
+traffic and reconnects do not extend the session lifetime.
+
 ## Ranking HTTP API
 
 `RankingController` serves `GET /api/ranking` and validates the optional limit

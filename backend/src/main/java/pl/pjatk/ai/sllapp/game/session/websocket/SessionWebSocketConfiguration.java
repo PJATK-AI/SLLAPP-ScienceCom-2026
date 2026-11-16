@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
@@ -13,6 +14,7 @@ import pl.pjatk.ai.sllapp.config.WebProperties;
 @Configuration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @EnableWebSocket
+@EnableScheduling
 @EnableConfigurationProperties(SessionWebSocketProperties.class)
 class SessionWebSocketConfiguration implements WebSocketConfigurer {
     private final SessionWebSocketHandler handler;
