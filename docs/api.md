@@ -11,10 +11,11 @@ Unrecognized types receive `UNKNOWN_TYPE`. These errors keep the socket open.
 
 `sllapp.websocket.max-message-bytes` defaults to 65536 UTF-8 bytes per complete
 text message. Larger messages receive `MESSAGE_TOO_LARGE` without closing the
-socket. The container buffer limit, `sllapp.websocket.transport-max-message-bytes`,
-defaults to 262144 and must exceed the application limit. Messages exceeding
-the container limit close the connection. Text fragments are assembled by the
-container before application validation.
+socket. The hard limit, `sllapp.websocket.transport-max-message-bytes`, defaults
+to 262144 and must exceed the application limit. Larger messages close the
+connection with code 1009. The same setting bounds the container buffers;
+the handler additionally checks UTF-8 bytes of completed text messages.
+Text fragments are assembled by the container before application validation.
 
 `sllapp.web.allowed-origins` controls both `/api/**` CORS and the WebSocket
 handshake. Its defaults are `http://localhost:5173` and `http://127.0.0.1:5173`.

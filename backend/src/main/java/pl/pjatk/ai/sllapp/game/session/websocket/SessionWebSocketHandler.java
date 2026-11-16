@@ -63,7 +63,12 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
         var connection = connections.get(session.getId());
         if (connection == null || !isUsable(connection)) return;
-        if (message.getPayload().getBytes(StandardCharsets.UTF_8).length > properties.maxMessageBytes()) {
+        int bytes = message.getPayload().getBytes(StandardCharsets.UTF_8).length;
+        if (bytes > properties.transportMaxMessageBytes()) {
+            connection.socket.close(CloseStatus.TOO_BIG_TO_PROCESS.withReason("Message exceeds transport limit"));
+            return;
+        }
+        if (bytes > properties.maxMessageBytes()) {
             error(session, "MESSAGE_TOO_LARGE", "Message exceeds the application size limit.");
             return;
         }
