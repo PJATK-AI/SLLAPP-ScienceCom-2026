@@ -15,6 +15,15 @@ and `WebProperties` configure REST CORS and provide the same origin list to
 the WebSocket handshake. `SessionWebSocketTest` checks the running server with
 JDK HTTP and WebSocket clients.
 
+`game.session.GameSession` is an immutable player session with UUID, nickname,
+selected hand and creation/expiry timestamps. `SessionRegistry` holds sessions
+in memory and uses the injected UTC `Clock` to check expiry. `NicknamePolicy`
+validates player names. These classes do not depend on WebSocket objects.
+The handler implements `create_session` and `resume_session`; its connection
+registry keeps Spring sockets separate from player data. Ownership changes are
+serialized per game session. Closing an old socket cannot detach its replacement.
+Outbound messages use `ConcurrentWebSocketSessionDecorator` to serialize sends.
+
 ## Ranking HTTP API
 
 `RankingController` serves `GET /api/ranking` and validates the optional limit

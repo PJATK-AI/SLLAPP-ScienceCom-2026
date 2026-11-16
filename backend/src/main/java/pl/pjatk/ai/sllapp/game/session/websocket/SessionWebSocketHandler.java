@@ -2,12 +2,18 @@ package pl.pjatk.ai.sllapp.game.session.websocket;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.web.socket.BinaryMessage;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
+import pl.pjatk.ai.sllapp.game.session.GameSession;
+import pl.pjatk.ai.sllapp.game.session.SelectedHand;
+import pl.pjatk.ai.sllapp.game.session.SessionRegistry;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -20,11 +26,30 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     private final ObjectMapper mapper;
     private final ObjectReader reader;
     private final SessionWebSocketProperties properties;
+    private final SessionRegistry sessions;
+    private final ConcurrentHashMap<String, SessionConnection> connections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, SessionConnection> owners = new ConcurrentHashMap<>();
 
-    SessionWebSocketHandler(ObjectMapper mapper, SessionWebSocketProperties properties) {
+    SessionWebSocketHandler(ObjectMapper mapper, SessionWebSocketProperties properties, SessionRegistry sessions) {
         this.mapper = mapper;
         this.reader = mapper.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.properties = properties;
+        this.sessions = sessions;
+    }
+
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) {
+        connections.put(session.getId(), new SessionConnection(session));
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        var connection = connections.remove(session.getId());
+        if (connection != null && connection.game != null) {
+            synchronized (connection.game) {
+                owners.remove(connection.game.sessionId(), connection);
+            }
+        }
     }
 
     @Override
@@ -44,7 +69,71 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
             error(session, "INVALID_MESSAGE", "Expected one JSON object with a string type.");
             return;
         }
-        error(session, "UNKNOWN_TYPE", "Unknown message type.");
+        var connection = connections.get(session.getId());
+        if (connection == null) return;
+        switch (input.path("type").asString()) {
+            case "create_session" -> create(connection, input);
+            case "resume_session" -> resume(connection, input);
+            default -> error(session, "UNKNOWN_TYPE", "Unknown message type.");
+        }
+    }
+
+    private void create(SessionConnection connection, JsonNode input) throws IOException {
+        if (alreadyBound(connection)) return;
+        if (!input.path("nickname").isString() || !input.path("selectedHand").isString()) {
+            error(connection.socket, "INVALID_SESSION", "Expected nickname and selectedHand strings.");
+            return;
+        }
+        GameSession game;
+        try {
+            game = sessions.create(input.path("nickname").asString(),
+                    SelectedHand.valueOf(input.path("selectedHand").asString()));
+        } catch (IllegalArgumentException exception) {
+            error(connection.socket, "INVALID_SESSION", "Nickname or selectedHand is invalid.");
+            return;
+        }
+        bind(connection, game);
+    }
+
+    private void resume(SessionConnection connection, JsonNode input) throws IOException {
+        if (alreadyBound(connection)) return;
+        UUID id;
+        try {
+            if (!input.path("sessionId").isString()) throw new IllegalArgumentException();
+            String value = input.path("sessionId").asString();
+            id = UUID.fromString(value);
+            if (!id.toString().equalsIgnoreCase(value)) throw new IllegalArgumentException();
+        } catch (IllegalArgumentException exception) {
+            error(connection.socket, "INVALID_SESSION", "Expected a UUID sessionId.");
+            return;
+        }
+        var game = sessions.find(id);
+        if (game.isEmpty()) {
+            connection.socket.close(CloseStatus.POLICY_VIOLATION.withReason("Unknown or expired session"));
+            return;
+        }
+        bind(connection, game.orElseThrow());
+    }
+
+    private boolean alreadyBound(SessionConnection connection) throws IOException {
+        if (connection.game == null) return false;
+        error(connection.socket, "SESSION_ALREADY_BOUND", "This connection already has a session.");
+        return true;
+    }
+
+    private void bind(SessionConnection connection, GameSession game) throws IOException {
+        SessionConnection previous;
+        synchronized (game) {
+            if (!sessions.isActive(game)) {
+                connection.socket.close(CloseStatus.POLICY_VIOLATION.withReason("Session expired"));
+                return;
+            }
+            connection.game = game;
+            if (connections.get(connection.socket.getId()) != connection || !connection.socket.isOpen()) return;
+            previous = owners.put(game.sessionId(), connection);
+            send(connection.socket, GameStateMessage.from(game));
+        }
+        if (previous != null) previous.socket.close(CloseStatus.NORMAL.withReason("Connection replaced"));
     }
 
     @Override
@@ -53,9 +142,12 @@ class SessionWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     private void error(WebSocketSession session, String code, String message) throws IOException {
-        synchronized (session) {
-            session.sendMessage(new TextMessage(mapper.writeValueAsString(new ErrorMessage("error", code, message))));
-        }
+        var connection = connections.get(session.getId());
+        if (connection != null) send(connection.socket, new ErrorMessage("error", code, message));
+    }
+
+    private void send(WebSocketSession session, Object message) throws IOException {
+        if (session.isOpen()) session.sendMessage(new TextMessage(mapper.writeValueAsString(message)));
     }
 
     private record ErrorMessage(String type, String code, String message) {}

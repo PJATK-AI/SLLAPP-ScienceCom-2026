@@ -58,6 +58,46 @@ class SessionWebSocketTest {
     }
 
     @Test
+    void createsAndResumesSessionOnAnotherConnection() throws Exception {
+        try (var first = new WebSocketTestClient(client, port, null);
+             var second = new WebSocketTestClient(client, port, null)) {
+            first.send("{\"type\":\"create_session\",\"nickname\":\" Ola \",\"selectedHand\":\"RIGHT\"}");
+            var state = first.next();
+            assertThat(state.path("type").asString()).isEqualTo("game_state");
+            assertThat(state.path("status").asString()).isEqualTo("CREATED");
+            assertThat(state.path("nickname").asString()).isEqualTo("Ola");
+            assertThat(state.path("selectedHand").asString()).isEqualTo("RIGHT");
+            assertThat(state.has("positionId")).isTrue();
+            assertThat(state.path("positionId").isNull()).isTrue();
+            java.util.UUID.fromString(state.path("sessionId").asString());
+            first.send("{\"type\":\"create_session\",\"nickname\":\"Other\",\"selectedHand\":\"LEFT\"}");
+            assertThat(first.next().path("code").asString()).isEqualTo("SESSION_ALREADY_BOUND");
+            second.send("{\"type\":\"resume_session\",\"sessionId\":\"" + state.path("sessionId").asString() + "\"}");
+            assertThat(second.next()).isEqualTo(state);
+            assertThat(first.closed.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1000);
+            second.send("{\"type\":\"unknown\"}");
+            assertThat(second.next().path("code").asString()).isEqualTo("UNKNOWN_TYPE");
+        }
+    }
+
+    @Test
+    void validatesCreationAndClosesForUnknownSession() throws Exception {
+        try (var socket = new WebSocketTestClient(client, port, null)) {
+            for (String fields : new String[]{"", ",\"nickname\":null", ",\"nickname\":\" \"",
+                    ",\"nickname\":\"FUCK\"", ",\"nickname\":\"" + "a".repeat(21) + "\""}) {
+                socket.send("{\"type\":\"create_session\",\"selectedHand\":\"LEFT\"" + fields + "}");
+                assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SESSION");
+            }
+            socket.send("{\"type\":\"create_session\",\"nickname\":\"Ola\",\"selectedHand\":\"Left\"}");
+            assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SESSION");
+            socket.send("{\"type\":\"resume_session\",\"sessionId\":\"invalid\"}");
+            assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SESSION");
+            socket.send("{\"type\":\"resume_session\",\"sessionId\":\"" + java.util.UUID.randomUUID() + "\"}");
+            assertThat(socket.closed.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1008);
+        }
+    }
+
+    @Test
     void checksOriginsForWebSocketAndRest() throws Exception {
         assertThatThrownBy(() -> new WebSocketTestClient(client, port, "http://untrusted.example"))
                 .hasCauseInstanceOf(WebSocketHandshakeException.class);

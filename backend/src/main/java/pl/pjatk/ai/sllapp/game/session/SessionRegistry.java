@@ -1,0 +1,40 @@
+package pl.pjatk.ai.sllapp.game.session;
+
+import java.time.Clock;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+@Component
+@EnableConfigurationProperties(SessionProperties.class)
+public class SessionRegistry {
+    private final ConcurrentHashMap<UUID, GameSession> sessions = new ConcurrentHashMap<>();
+    private final Clock clock;
+    private final SessionProperties properties;
+    private final NicknamePolicy nicknames;
+
+    public SessionRegistry(Clock clock, SessionProperties properties, NicknamePolicy nicknames) {
+        this.clock = clock;
+        this.properties = properties;
+        this.nicknames = nicknames;
+    }
+
+    public GameSession create(String nickname, SelectedHand selectedHand) {
+        String validated = nicknames.validate(nickname);
+        if (selectedHand == null) throw new IllegalArgumentException("Selected hand is required.");
+        var now = clock.instant();
+        var session = new GameSession(UUID.randomUUID(), validated, selectedHand, now, now.plus(properties.creationTtl()));
+        sessions.put(session.sessionId(), session);
+        return session;
+    }
+
+    public Optional<GameSession> find(UUID id) {
+        return Optional.ofNullable(sessions.get(id)).filter(this::isActive);
+    }
+
+    public boolean isActive(GameSession session) {
+        return clock.instant().isBefore(session.expiresAt()) && sessions.get(session.sessionId()) == session;
+    }
+}

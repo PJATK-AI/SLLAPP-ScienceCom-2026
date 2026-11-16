@@ -20,6 +20,45 @@ container before application validation.
 handshake. Its defaults are `http://localhost:5173` and `http://127.0.0.1:5173`.
 Clients without an `Origin` header can connect.
 
+### Create a session
+
+After opening `/ws`, send:
+
+```json
+{"type":"create_session","nickname":" Ola ","selectedHand":"RIGHT"}
+```
+
+The response contains a new UUID and the stored player data:
+
+```json
+{"type":"game_state","sessionId":"6a386307-3c19-4e3b-90c7-ae405835f825","status":"CREATED","nickname":"Ola","selectedHand":"RIGHT","positionId":null}
+```
+
+The nickname is stripped of leading/trailing Java whitespace and must contain
+1–20 Unicode code points, without control or format characters. The configured
+`sllapp.session.blocked-words` list rejects complete letter sequences after NFKC
+normalization and case folding to lowercase. Digits and punctuation separate
+words; substrings within other words are accepted. The default list contains
+common Polish and English profanity. This is a word filter, not full moderation.
+`selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
+
+### Resume a session
+
+```json
+{"type":"resume_session","sessionId":"6a386307-3c19-4e3b-90c7-ae405835f825"}
+```
+
+Send this on a new connection to receive the stored `game_state`. The server
+replaces the previous connection, closing it with code 1000. Each connection
+can create or resume only one session; another such command returns
+`SESSION_ALREADY_BOUND`. Invalid UUID syntax receives `INVALID_SESSION`;
+an unknown or expired UUID closes the connection with code 1008.
+
+Sessions live in memory in one backend process. A restart removes them.
+`sllapp.session.creation-ttl` defaults to `5m` from creation; reconnecting does
+not extend the expiry time. Disconnecting leaves the session available until
+that deadline.
+
 ## Read the ranking
 
 `GET /api/ranking?limit=N`
