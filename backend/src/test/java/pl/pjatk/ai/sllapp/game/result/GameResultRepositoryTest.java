@@ -1,4 +1,4 @@
-package pl.pjatk.ai.sllapp.ranking;
+package pl.pjatk.ai.sllapp.game.result;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -12,7 +12,7 @@ import pl.pjatk.ai.sllapp.SllappApplication;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class SqliteRankingTest {
+class GameResultRepositoryTest {
 
     @TempDir
     Path tempDirectory;
@@ -26,7 +26,7 @@ class SqliteRankingTest {
         GameResult third = new GameResult("third", "Jan", 50, finishedAt.minusSeconds(1));
 
         try (var app = start(dataDirectory)) {
-            var results = app.getBean(ResultRepository.class);
+            var results = app.getBean(GameResultRepository.class);
             assertThat(results.save(second)).isTrue();
             assertThat(results.save(third)).isTrue();
             assertThat(results.save(first)).isTrue();
@@ -35,7 +35,7 @@ class SqliteRankingTest {
         assertThat(dataDirectory.resolve("sllapp.db")).isRegularFile();
 
         try (var app = start(dataDirectory)) {
-            var results = app.getBean(ResultRepository.class);
+            var results = app.getBean(GameResultRepository.class);
             assertThat(results.save(new GameResult("first", "Other", 200, finishedAt))).isFalse();
             assertThat(results.findTopResults(10)).containsExactly(first, second, third);
             assertThat(results.findTopResults(2)).containsExactly(first, second);
