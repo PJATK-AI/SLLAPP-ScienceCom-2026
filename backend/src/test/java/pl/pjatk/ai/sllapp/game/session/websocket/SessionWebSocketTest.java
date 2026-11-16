@@ -20,14 +20,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SessionWebSocketTest {
-    @TempDir
-    Path directory;
     private ConfigurableApplicationContext app;
     private HttpClient client;
     private int port;
 
     @BeforeAll
-    void start() {
+    void start(@TempDir Path directory) {
         app = new SpringApplicationBuilder(SllappApplication.class).run(
                 "--server.port=0", "--sllapp.storage.directory=" + directory,
                 "--sllapp.web.allowed-origins=http://localhost:5173");

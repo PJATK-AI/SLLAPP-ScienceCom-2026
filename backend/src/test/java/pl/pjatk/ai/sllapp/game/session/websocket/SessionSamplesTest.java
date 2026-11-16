@@ -16,14 +16,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SessionSamplesTest {
-    @TempDir
-    Path directory;
     private ConfigurableApplicationContext app;
     private HttpClient client;
     private int port;
 
     @BeforeAll
-    void start() {
+    void start(@TempDir Path directory) {
         app = new SpringApplicationBuilder(SllappApplication.class).run(
                 "--server.port=0", "--sllapp.storage.directory=" + directory,
                 "--sllapp.websocket.diagnostic-mode=true");
