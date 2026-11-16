@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 from dataclasses import asdict, dataclass
@@ -88,7 +87,6 @@ def samples_to_arrays(samples: Iterable[Any]):
 
 
 class LandmarkPreprocessor(BaseEstimator, TransformerMixin):
-
     def __init__(self, scale_method: str = "none"):
         self.scale_method = scale_method
 
@@ -134,12 +132,6 @@ class CVResult:
 
 
 def make_folds(groups, n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED):
-    """Train/validation folds divided by people.
-
-    ``KFold`` (shuffled with ``seed``) splits the unique subject ids, then every sample goes to
-    the side of its subject. With 12 people and 4 splits each fold trains on 9 people and
-    validates on 3 (75/25), and every person is in validation exactly once.
-    """
     groups = np.asarray(groups)
     subjects = np.unique(groups)
     if not 2 <= n_splits <= len(subjects):
@@ -155,7 +147,6 @@ def make_folds(groups, n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED):
 def evaluate(X, y, groups, variants: Sequence[str] = tuple(VARIANTS),
              classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
              n_splits: int = CV_SPLITS, seed: int = RANDOM_SEED) -> List[CVResult]:
-
     folds = make_folds(groups, n_splits, seed)
     results = []
     for vid in variants:
@@ -194,11 +185,6 @@ class NestedFoldResult:
 
 def select_best(X, y, groups, variants: Sequence[str], classifiers: Sequence[str],
                 n_splits: int = INNER_CV_SPLITS, seed: int = RANDOM_SEED) -> CVResult:
-    """Choose the variant x classifier with the highest mean validation accuracy.
-
-    Uses only the rows it is given (in nested CV: the outer training people). Ties keep the
-    first combination in ``variants`` x ``classifiers`` order.
-    """
     results = evaluate(X, y, groups, variants, classifiers, n_splits, seed)
     return max(results, key=lambda r: r.accuracy_mean)
 
@@ -207,13 +193,6 @@ def nested_evaluate(X, y, groups, variants: Sequence[str] = tuple(VARIANTS),
                     classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
                     outer_splits: int = CV_SPLITS, inner_splits: int = INNER_CV_SPLITS,
                     seed: int = RANDOM_SEED) -> List[NestedFoldResult]:
-    """Unbiased estimate of the whole procedure "compare variants, keep the best one".
-
-    Outer loop: folds divided by people (9 train / 3 test people). For each outer fold, the
-    inner loop runs the variant comparison on the 9 training people only (folds divided by
-    people again), the best combination is refitted on those 9 people and scored once on the
-    3 test people. The test people are never used for selection, scaling or fitting.
-    """
     X, y, groups = np.asarray(X), np.asarray(y), np.asarray(groups)
     results = []
     for i, (train, test) in enumerate(make_folds(groups, outer_splits, seed), start=1):
@@ -246,7 +225,7 @@ def format_nested_results(results: Sequence[NestedFoldResult]) -> str:
 #  trained model: save, load, inference
 
 class VariantMismatchError(ValueError):
-    """Raised when a model file does not match the requested or recorded variant."""
+    pass
 
 
 def _check_pipeline_matches(pipeline: Pipeline, variant: Variant) -> None:
@@ -259,7 +238,6 @@ def _check_pipeline_matches(pipeline: Pipeline, variant: Variant) -> None:
 
 
 class TrainedModel:
-
     def __init__(self, pipeline: Pipeline, variant: Variant, classifier: str):
         _check_pipeline_matches(pipeline, variant)
         self.pipeline = pipeline
@@ -274,7 +252,6 @@ class TrainedModel:
         return str(self.pipeline.predict(np.asarray([landmarks_to_row(landmarks)]))[0])
 
     def predict_hand(self, hand: Any) -> str:
-
         if not isinstance(hand, Mapping) or "landmarks" not in hand:
             raise LandmarkValidationError("hand must be an object with a 'landmarks' list")
         return self.predict_landmarks(hand["landmarks"])
@@ -290,14 +267,12 @@ class TrainedModel:
 
 def train_model(samples: Iterable[Any], variant_id: str = DEFAULT_VARIANT,
                 classifier: str = "logreg", seed: int = RANDOM_SEED) -> TrainedModel:
-
     variant = get_variant(variant_id)
     X, y, _ = samples_to_arrays(samples)
     return TrainedModel(build_pipeline(variant, classifier, seed).fit(X, y), variant, classifier)
 
 
 def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
-
     data = joblib.load(path)
     if not isinstance(data, dict) or data.get("format") != MODEL_FORMAT:
         raise ValueError("%s is not a model file of format %d" % (path, MODEL_FORMAT))

@@ -114,8 +114,6 @@ class ValidationErrorTests(unittest.TestCase):
 
 
 class SharedPipelineTests(unittest.TestCase):
-
-
     def test_training_and_inference_give_identical_output(self):
         sample = Sample("A_1_1", "A", 1, 1, tuple(HAND))
         self.assertEqual(preprocess_sample(sample), preprocess_hand(as_message_hand(HAND)))

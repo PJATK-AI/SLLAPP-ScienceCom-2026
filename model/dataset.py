@@ -1,11 +1,3 @@
-"""Loading of SPAS sample files.
-
-The sample files are Python pickles of a ``RawData`` object. Unpickling arbitrary
-data can execute code, so files are read with a restricted unpickler that only
-accepts the ``RawData`` class and rejects everything else.
-
-Nothing is skipped silently: every problem is returned as an :class:`Issue`.
-"""
 import math
 import os
 import pickle
@@ -23,7 +15,6 @@ Landmarks = Tuple[Tuple[float, float, float], ...]
 
 @dataclass(frozen=True)
 class Issue:
-    """A single problem found in the dataset."""
     check: str
     message: str
     file: Optional[str] = None
@@ -34,7 +25,6 @@ class Issue:
 
 @dataclass(frozen=True)
 class Sample:
-    """One recording: ``landmarks[i]`` is ``(x, y, z)`` of landmark ``i`` (see ``LANDMARK_NAMES``)."""
     name: str
     label: str
     subject: int
@@ -43,7 +33,6 @@ class Sample:
 
 
 def parse_sample_name(name: str) -> Optional[Tuple[str, int, int]]:
-    """``'C_6_2'`` -> ``('C', 6, 2)``; ``None`` if the name does not match the format."""
     m = SAMPLE_NAME_RE.match(name)
     if not m:
         return None
@@ -51,7 +40,7 @@ def parse_sample_name(name: str) -> Optional[Tuple[str, int, int]]:
 
 
 class _RawDataStub:
-    """Stand-in for the dataset's ``RawData`` class (attributes are restored by pickle)."""
+    pass
 
 
 class _RestrictedUnpickler(pickle.Unpickler):
@@ -62,7 +51,6 @@ class _RestrictedUnpickler(pickle.Unpickler):
 
 
 def read_raw_sample(path: Union[str, "os.PathLike[str]"]) -> dict:
-    """Read one sample file with the restricted unpickler and return its attributes."""
     with open(path, "rb") as fh:
         obj = _RestrictedUnpickler(fh).load()
     if not isinstance(obj, _RawDataStub):
@@ -71,7 +59,6 @@ def read_raw_sample(path: Union[str, "os.PathLike[str]"]) -> dict:
 
 
 def check_raw_sample(raw: dict) -> List[str]:
-    """Return a list of problems with a raw sample (empty list = valid)."""
     problems: List[str] = []
     if raw.get("hasData") is not True:
         problems.append("hasData=%r (expected True)" % (raw.get("hasData"),))
@@ -96,12 +83,6 @@ def check_raw_sample(raw: dict) -> List[str]:
 
 
 def collect_samples(dataset_dir) -> Tuple[Dict[str, Sample], List[str], List[Issue]]:
-    """Read every entry of ``dataset_dir``.
-
-    Returns ``(valid_samples, parsed_names, issues)``. ``parsed_names`` lists all files
-    whose *name* is well-formed (readable or not). Every unusable file or entry
-    produces an issue; none is dropped without a trace.
-    """
     samples: Dict[str, Sample] = {}
     parsed_names: List[str] = []
     issues: List[Issue] = []
@@ -135,12 +116,6 @@ def collect_samples(dataset_dir) -> Tuple[Dict[str, Sample], List[str], List[Iss
 
 
 def load_dataset(path=None, *, strict_order: bool = False) -> List[Sample]:
-    """Load and validate the dataset; return all samples sorted by name.
-
-    Raises :class:`model.validation.DatasetValidationError` (with the full report)
-    if anything is wrong. ``path`` defaults to ``$SLLAPP_DATASET_DIR`` or the
-    default location from :mod:`model.config`.
-    """
     from .validation import DatasetValidationError, validate_dataset
 
     report = validate_dataset(get_dataset_dir(path), strict_order=strict_order)

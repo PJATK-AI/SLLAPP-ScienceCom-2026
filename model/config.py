@@ -1,4 +1,3 @@
-"""Dataset location and expected dataset structure."""
 import os
 from pathlib import Path
 from typing import Optional, Tuple, Union
@@ -11,7 +10,7 @@ DEFAULT_DATASET_DIR = MODEL_DIR / "data" / "SPAS" / "dataset"
 #: Environment variable that overrides the default dataset location.
 DATASET_ENV_VAR = "SLLAPP_DATASET_DIR"
 
-# --- expected dataset structure ---------------------------------------------
+# expected dataset structure
 N_LETTERS = 16
 N_SUBJECTS = 12
 N_REPETITIONS = 5
@@ -59,7 +58,6 @@ HAND_BONES: Tuple[Tuple[int, int], ...] = (
 
 
 def get_dataset_dir(path: Optional[Union[str, os.PathLike]] = None) -> Path:
-    """Resolve the dataset folder: explicit ``path`` > ``$SLLAPP_DATASET_DIR`` > default."""
     if path is not None:
         return Path(path)
     env = os.environ.get(DATASET_ENV_VAR)
