@@ -1,55 +1,193 @@
-# SLLAPP-ScienceCom-2026
+<a id="readme-top"></a>
 
-Sign Language Learning Application for ScienceCom 2026
+<div align="center">
+  <h1>SLLAPP · ScienceCom 2026</h1>
+  <p>Sign Language Learning Application</p>
+  <p>WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand-tracking packages.</p>
+  <p>
+    <img src="https://img.shields.io/badge/Java-21-ED8B00?style=flat-square" alt="Java 21">
+    <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square" alt="Vue 3">
+    <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square" alt="SQLite">
+  </p>
+  <p>
+    <a href="docs/api.md">API reference</a> ·
+    <a href="docs/backend-architecture.md">Backend architecture</a> ·
+    <a href="https://github.com/PJATK-AI/SLLAPP-ScienceCom-2026/issues">Issues</a>
+  </p>
+</div>
 
-## Backend
+<details>
+  <summary>Table of contents</summary>
 
-The Spring Boot backend is in `backend/` and requires JDK 21. Run these commands from the repository root:
+- [About the project](#about-the-project)
+- [Getting started](#getting-started)
+- [Usage](#usage)
+- [Repository structure](#repository-structure)
+- [Development and testing](#development-and-testing)
+- [Documentation and contributing](#documentation-and-contributing)
+- [License](#license)
+
+</details>
+
+## About the project
+
+SLLAPP is the Sign Language Learning Application project for ScienceCom 2026,
+maintained by PJATK AI.
+
+The backend creates player sessions over WebSocket, validates hand samples,
+stores game results and serves an ordered ranking over REST. The
+frontend workspace contains a Vue application scaffold, a MediaPipe hand tracker
+and its Vue wrapper. The web application displays an interactive counter.
+
+| Component | Technologies |
+| --- | --- |
+| Backend | Java 21, Spring Boot, WebSocket, Spring JDBC, SQLite |
+| Frontend | Vue 3, TypeScript, Vite, MediaPipe Hand Landmarker |
+| Build and tests | Maven Wrapper, pnpm, Turborepo, JUnit, Vitest |
+| CI | GitHub Actions |
+
+## Getting started
+
+### Prerequisites
+
+| Tool | Required version |
+| --- | --- |
+| JDK | 21 |
+| Node.js | 24.15 or newer |
+| pnpm | 12.21.0, as declared in `frontend/package.json` |
+
+The backend includes the Maven Wrapper. SQLite runs inside the backend process
+and stores data in a local file.
+
+### Start the backend
+
+From the repository root, run:
 
 ```powershell
 cd backend
 .\mvnw.cmd spring-boot:run
 ```
 
-On Linux or macOS, run `sh mvnw spring-boot:run` from `backend/`.
-The server listens on `http://127.0.0.1:8080`. No endpoints are defined yet.
+On Linux or macOS, use `sh mvnw spring-boot:run` from `backend/`.
+The server listens on **http://127.0.0.1:8080**.
 
-The backend creates a local SQLite database for game results at `./data/sllapp.db`,
-relative to its working directory. Set `DATA_DIR` to use a different directory.
-Keep this directory between runs to retain the ranking.
+### Start the frontend
 
-## Frontend
+In a second terminal, from the repository root, run:
 
-The frontend in `frontend/` is a pnpm + Turborepo monorepo using Vue 3, TypeScript and Vite.
-It requires Node.js 24.15 or newer and pnpm 12.
-
-Add new libraries as folders in `packages/` and depend on them with `"workspace:*"`.
-Turborepo builds dependencies first (`dependsOn: ["^build"]`) and caches results.
-
-In development, Vite and TypeScript load libraries straight from their `src/` through the
-`development` condition in each library's `exports`, so changes show up with HMR and no build step.
-Production builds use the compiled `dist/` output. Give every new library the same `exports` layout.
-
-```powershell
+```sh
 cd frontend
-pnpm install
-pnpm dev          # start the Vite dev server
-pnpm build        # build all packages
-pnpm test         # run Vitest unit tests in all packages
-pnpm typecheck    # type-check all packages
-pnpm format       # format code with Prettier (format:check only verifies)
-pnpm format:check # verify code with Prettier
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-## AI module
+Open the local URL printed by Vite.
 
-The AI module in `model/` loads and validates the SPAS hand-landmark dataset. It uses only the Python
-standard library (tested with Python 3.13). Run these commands from the repository root:
+## Usage
+
+### Open a WebSocket session
+
+With the backend running, use a browser console on the local Vite page:
+
+```javascript
+const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+socket.onmessage = (event) => console.log(JSON.parse(event.data));
+socket.onopen = () => socket.send(JSON.stringify({
+    type: 'create_session',
+    nickname: 'Ola',
+    selectedHand: 'RIGHT',
+}));
+```
+
+The server responds with `game_state`, a `sessionId`, player data and
+`positionId: null`. The connection accepts `hand_sample` and `no_hand` messages.
+Sessions expire five minutes after creation by default; their data lives in
+memory. A new socket can resume a session and replace its previous connection.
+See the [WebSocket reference](docs/api.md#websocket-transport) for complete
+messages, reconnect behavior, origin settings and optional acknowledgements.
+
+### Read the ranking
+
+With the backend running, request the top results:
+
+```sh
+curl "http://127.0.0.1:8080/api/ranking?limit=10"
+```
+
+The endpoint returns a JSON array of `rank`, `nickname` and `score`. It orders
+results by score descending, then by earlier finish time, with the session
+identifier as the final tie-breaker. An empty database returns `[]`.
+
+The default limit is 10. Values outside 1–100 and invalid input return `400` with a
+`ProblemDetail` body. See the [API reference](docs/api.md) for response examples.
+
+### Keep saved results
+
+The backend creates `data/sllapp.db` relative to its working directory. With the
+startup commands above, that file is `backend/data/sllapp.db`. Set `DATA_DIR` to
+choose another storage directory. Keep the database file between runs to retain
+saved results.
+
+## Repository structure
+
+| Path | Contents |
+| --- | --- |
+| `backend/` | Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
+| `frontend/apps/web/` | Vue application scaffold |
+| `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
+| `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
+| `docs/` | API reference, backend architecture and project workflow |
+| `.github/workflows/ci.yml` | Backend and frontend checks |
+
+## Development and testing
+
+### Backend checks
+
+From `backend/`:
 
 ```powershell
-python -m model                                     # validate the dataset
-python -m unittest discover -s model/tests -t .     # run the tests
+.\mvnw.cmd -B verify
 ```
 
-See [`model/README.md`](model/README.md) for the dataset location, the landmark order and the
-provenance and license status of the dataset.
+On Linux or macOS, use `sh mvnw -B verify`. The tests cover WebSocket creation,
+reconnects, expiry, concurrent ownership, sample validation and message limits,
+as well as SQLite persistence and ranking HTTP responses. Integration tests use
+random server ports and temporary databases.
+
+### Frontend commands
+
+Run these commands from `frontend/`:
+
+| Command | Action |
+| --- | --- |
+| `pnpm dev` | Start the development server |
+| `pnpm build` | Build the application and workspace libraries |
+| `pnpm typecheck` | Check TypeScript types across the workspace |
+| `pnpm test` | Run Vitest tests |
+| `pnpm format:check` | Check formatting with Prettier |
+| `pnpm format` | Apply Prettier formatting |
+
+Workspace libraries live in `packages/` and use `workspace:*` dependencies.
+Turborepo builds dependencies first and caches build output. In development,
+Vite and TypeScript resolve library exports to `src/` through the `development`
+condition; production builds use compiled `dist/` output.
+
+The [CI workflow](.github/workflows/ci.yml) runs backend verification and frontend
+formatting, build, type checks and tests on pull requests and pushes to `master`.
+
+## Documentation and contributing
+
+| Document | Contents |
+| --- | --- |
+| [API reference](docs/api.md) | WebSocket messages, ranking requests, configuration and errors |
+| [Backend architecture](docs/backend-architecture.md) | Packages, session lifecycle, result storage and tests |
+| [Project workflow](docs/WORKFLOW.md) | Issues, branches, commits, validation and pull requests |
+
+Follow the project workflow when contributing. Changes reach `master` through
+pull requests; the project uses merge commits.
+
+## License
+
+Distributed under the [MIT License](LICENSE). Copyright © 2026 PJATK{AI}.
+
+<p align="right"><a href="#readme-top">Back to top ↑</a></p>

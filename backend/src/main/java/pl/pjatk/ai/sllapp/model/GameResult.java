@@ -1,4 +1,4 @@
-package pl.pjatk.ai.sllapp.ranking;
+package pl.pjatk.ai.sllapp.model;
 
 import java.time.Instant;
 

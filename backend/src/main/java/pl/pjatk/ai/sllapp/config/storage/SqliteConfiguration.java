@@ -1,4 +1,4 @@
-package pl.pjatk.ai.sllapp.ranking;
+package pl.pjatk.ai.sllapp.config.storage;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -6,16 +6,17 @@ import java.nio.file.Path;
 import javax.sql.DataSource;
 
 import org.sqlite.SQLiteDataSource;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(StorageProperties.class)
 class SqliteConfiguration {
 
     @Bean
-    DataSource dataSource(@Value("${sllapp.storage.directory}") Path directory) throws IOException {
-        Path dataDirectory = Files.createDirectories(directory.toAbsolutePath().normalize());
+    DataSource dataSource(StorageProperties properties) throws IOException {
+        Path dataDirectory = Files.createDirectories(properties.directory().toAbsolutePath().normalize());
         Path databaseFile = dataDirectory.resolve("sllapp.db");
 
         SQLiteDataSource dataSource = new SQLiteDataSource();
