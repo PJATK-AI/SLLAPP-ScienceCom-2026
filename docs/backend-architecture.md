@@ -1,10 +1,57 @@
 # Backend architecture
 
-The SLLAPP backend uses Java 21 and Spring Boot. It stores game results in a local
-SQLite database and provides repository methods for saving results and reading
-them in ranking order.
+The SLLAPP backend uses Java 21 and Spring Boot. It manages player sessions over
+WebSocket and validates hand samples. Game results are stored in SQLite and
+exposed through a ranking REST API.
 
 See the [README](../README.md) for local setup and commands.
+
+## WebSocket transport
+
+`game.session.websocket` registers the plain JSON endpoint `/ws`, validates
+message envelopes and reports protocol errors. `SessionWebSocketProperties`
+configures application and container message limits. `config.WebConfiguration`
+and `WebProperties` configure REST CORS and provide the same origin list to
+the WebSocket handshake. `SessionWebSocketTest` checks the running server with
+JDK HTTP and WebSocket clients.
+
+`game.session.GameSession` is an immutable player session with UUID, nickname,
+selected hand and creation/expiry timestamps. `SessionRegistry` holds sessions
+in memory and uses the injected UTC `Clock` to check expiry. `NicknamePolicy`
+validates player names. It uses `BlockedWordList`, which reads the blocked-word
+file from `sllapp.session.blocked-words-location` once at startup. These classes do not depend on WebSocket objects.
+The handler implements `create_session` and `resume_session`; its connection
+registry keeps Spring sockets separate from player data. Ownership changes are
+serialized per game session. Closing an old socket cannot detach its replacement.
+Outbound messages use `ConcurrentWebSocketSessionDecorator` to serialize sends.
+
+`SampleMessageValidator` validates `hand_sample` and `no_hand`. A `SampleMessage`
+retains the hand JSON, including additional fields. Each `SessionConnection`
+stores only the latest accepted sample and sequence number. Validation precedes
+sequence advancement; ownership and expiry are checked under the session lock.
+Diagnostic acknowledgements are controlled by `SessionWebSocketProperties`.
+
+A scheduled task runs every second, removes expired sessions from the registry
+and closes their current sockets. Incoming messages also check the deadline.
+Tests inject a controllable clock to check exact expiry and ensure that sample
+traffic and reconnects do not extend the session lifetime.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant WS as SessionWebSocketHandler
+    participant Sessions as SessionRegistry
+    Client->>WS: create_session (nickname, selectedHand)
+    WS->>Sessions: validate and store player session
+    Sessions-->>WS: GameSession
+    WS-->>Client: game_state (CREATED, sessionId, positionId=null)
+    Client->>WS: hand_sample / no_hand
+    WS->>Sessions: check expiry
+    Note over WS: validate sample and sequence; retain latest sample
+    opt Diagnostic mode
+        WS-->>Client: sample_ack
+    end
+```
 
 ## Ranking HTTP API
 
@@ -24,23 +71,63 @@ backend/src/
 │   ├── java/pl/pjatk/ai/sllapp/
 │   │   ├── SllappApplication.java
 │   │   ├── config/
-│   │   │   └── SqliteConfiguration.java
+│   │   │   ├── SqliteConfiguration.java
+│   │   │   ├── TimeConfiguration.java
+│   │   │   ├── WebConfiguration.java
+│   │   │   └── WebProperties.java
 │   │   ├── game/
-│   │   │   └── result/
-│   │   │       ├── GameResult.java
-│   │   │       └── GameResultRepository.java
+│   │   │   ├── result/
+│   │   │   │   ├── GameResult.java
+│   │   │   │   └── GameResultRepository.java
+│   │   │   └── session/
+│   │   │       ├── BlockedWordList.java
+│   │   │       ├── GameSession.java
+│   │   │       ├── NicknamePolicy.java
+│   │   │       ├── SelectedHand.java
+│   │   │       ├── SessionProperties.java
+│   │   │       ├── SessionRegistry.java
+│   │   │       └── websocket/
+│   │   │           ├── GameStateMessage.java
+│   │   │           ├── SampleMessage.java
+│   │   │           ├── SampleMessageValidator.java
+│   │   │           ├── SessionConnection.java
+│   │   │           ├── SessionWebSocketConfiguration.java
+│   │   │           ├── SessionWebSocketHandler.java
+│   │   │           └── SessionWebSocketProperties.java
 │   │   └── ranking/
 │   │       ├── RankingController.java
 │   │       ├── RankingService.java
 │   │       └── RankingEntryResponse.java
 │   └── resources/
 │       ├── application.yml
+│       ├── moderation/
+│       │   ├── blocked-words.txt
+│       │   ├── LICENSE-LDNOOBW.txt
+│       │   └── SOURCES.md
 │       └── schema.sql
-└── test/java/pl/pjatk/ai/sllapp/
-    ├── game/result/
-    │   └── GameResultRepositoryTest.java
-    └── ranking/
-        └── RankingApiTest.java
+└── test/
+    ├── java/pl/pjatk/ai/sllapp/
+    │   ├── game/result/
+    │   │   └── GameResultRepositoryTest.java
+    │   ├── game/session/
+    │   │   ├── BlockedWordListTest.java
+    │   │   ├── MutableClock.java
+    │   │   ├── NicknamePolicyTest.java
+    │   │   ├── SessionRegistryTest.java
+    │   │   └── websocket/
+    │   │       ├── SampleFixtures.java
+    │   │       ├── SampleMessageValidatorTest.java
+    │   │       ├── SessionExpiryTest.java
+    │   │       ├── SessionOwnershipTest.java
+    │   │       ├── SessionSamplesTest.java
+    │   │       ├── SessionWebSocketTest.java
+    │   │       ├── WebSocketSizeTest.java
+    │   │       └── WebSocketTestClient.java
+    │   └── ranking/
+    │       └── RankingApiTest.java
+    └── resources/
+        └── moderation/
+            └── test-blocked-words.txt
 ```
 
 | File | Responsibility |
@@ -51,6 +138,7 @@ backend/src/
 | [`SqliteConfiguration.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/config/SqliteConfiguration.java) | Storage directory creation and SQLite `DataSource` |
 | [`application.yml`](../backend/src/main/resources/application.yml) | Server, storage and schema initialization settings |
 | [`schema.sql`](../backend/src/main/resources/schema.sql) | Result table and ranking index |
+| [`blocked-words.txt`](../backend/src/main/resources/moderation/blocked-words.txt) | Default blocked-word list; source and license in [`SOURCES.md`](../backend/src/main/resources/moderation/SOURCES.md) |
 
 ## Startup and configuration
 
@@ -70,6 +158,12 @@ directory to an absolute path, creates the directory and configures a
 The default database path is `./data/sllapp.db`, relative to the backend process
 working directory. Set `DATA_DIR` to use another directory. Keeping the database
 file preserves saved results across application restarts.
+
+Session and WebSocket settings are bound through `@ConfigurationProperties`.
+Their defaults are declared in `SessionProperties`, `SessionWebSocketProperties`
+and `WebProperties`; see [the configuration table](api.md#websocket-configuration).
+The session registry is local to one application instance and is separate from
+SQLite result storage.
 
 ## Stored result
 
@@ -113,6 +207,16 @@ row limit as a bound SQL parameter. A limit below 1 causes
 `IllegalArgumentException`.
 
 ## Test coverage and CI
+
+The WebSocket tests cover creation, nickname validation, resuming, concurrent
+ownership changes, delayed close callbacks, expiry with a controlled clock,
+sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
+UTF-8 size boundaries, fragmented text and oversized binary messages.
+`BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
+duplicates, NFKC normalization, the bundled list, and startup errors for missing,
+unreadable, malformed, empty or invalid files and directories. Other session
+tests use the small list in `test-blocked-words.txt`. Integration
+tests use a real embedded server on random ports and temporary SQLite files.
 
 `RankingApiTest` starts the HTTP server on a random port with a temporary SQLite
 database. It checks the empty response, output fields, score and timestamp
