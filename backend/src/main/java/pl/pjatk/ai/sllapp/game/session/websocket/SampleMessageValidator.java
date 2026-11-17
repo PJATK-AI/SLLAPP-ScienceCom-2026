@@ -24,8 +24,9 @@ class SampleMessageValidator {
         if ("no_hand".equals(type)) return new SampleMessage(type, seq.longValue(), null);
 
         var hand = input.path("hand");
-        String handedness = hand.path("handedness").asString();
-        if (!hand.isObject() || !("LEFT".equals(handedness) || "RIGHT".equals(handedness))) {
+        var handedness = hand.path("handedness");
+        if (!hand.isObject() || !handedness.isString()
+                || !("LEFT".equals(handedness.asString()) || "RIGHT".equals(handedness.asString()))) {
             throw new IllegalArgumentException("hand.handedness must be LEFT or RIGHT.");
         }
         var points = hand.path("landmarks");

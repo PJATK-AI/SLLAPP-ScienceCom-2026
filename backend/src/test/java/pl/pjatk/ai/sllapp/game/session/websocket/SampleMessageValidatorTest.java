@@ -54,6 +54,17 @@ class SampleMessageValidatorTest {
             ((ObjectNode) input.path("hand")).put("handedness", handedness);
             assertThatIllegalArgumentException().isThrownBy(() -> validator.validate(input));
         }
+        for (String handedness : new String[]{"{}", "[\"LEFT\"]", "1", "true", "null"}) {
+            var input = mapper.readTree(SampleFixtures.hand(0));
+            ((ObjectNode) input.path("hand")).set("handedness", mapper.readTree(handedness));
+            assertThatIllegalArgumentException().as("handedness=%s", handedness)
+                    .isThrownBy(() -> validator.validate(input));
+        }
+        for (String hand : new String[]{"null", "5", "\"LEFT\"", "[]"}) {
+            var input = (ObjectNode) mapper.readTree(SampleFixtures.hand(0));
+            input.set("hand", mapper.readTree(hand));
+            assertThatIllegalArgumentException().as("hand=%s", hand).isThrownBy(() -> validator.validate(input));
+        }
         for (int count : new int[]{20, 22}) {
             var input = mapper.readTree(SampleFixtures.hand(0));
             var points = (ArrayNode) input.path("hand").path("landmarks");
