@@ -88,6 +88,51 @@ class PipelineTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_SKLEARN, "numpy/scikit-learn not installed")
+class FinalTrainingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.samples = synthetic_samples(subjects=range(1, 9))
+        cls.final = training.train_final(cls.samples, ["V0", "V2"], ["knn", "logreg"],
+                                       outer_splits=4, inner_splits=3)
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.model_path, cls.report_path = training.write_final_run(cls.final, cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_final_choice_uses_the_selection_rule(self):
+        best = training.best_result(self.final.comparison)
+        self.assertEqual((self.final.model.variant.id, self.final.model.classifier),
+                         (best.variant, best.classifier))
+        self.assertEqual(best.accuracy_mean, max(r.accuracy_mean for r in self.final.comparison))
+
+    def test_every_candidate_is_compared(self):
+        self.assertEqual({(r.variant, r.classifier) for r in self.final.comparison},
+                         {(v, c) for v in ("V0", "V2") for c in ("knn", "logreg")})
+        self.assertEqual(len(self.final.nested), 4)
+
+    def test_final_model_is_trained_on_all_samples(self):
+        X, y, _ = samples_to_arrays(self.samples)
+        self.assertEqual(self.final.n_samples, len(y))
+        self.assertEqual(self.final.n_people, 8)
+        self.assertEqual(self.final.model.classes, sorted(set(y)))
+        clf = self.final.model.pipeline.named_steps["classifier"]
+        n_seen = getattr(clf, "n_samples_fit_", None)
+        if n_seen is not None:
+            self.assertEqual(n_seen, len(y))
+
+    def test_saved_model_and_report(self):
+        loaded = load_model(self.model_path, expected_variant=self.final.model.variant.id)
+        X, _, _ = samples_to_arrays(self.samples)
+        np.testing.assert_array_equal(loaded.pipeline.predict(X), self.final.model.pipeline.predict(X))
+        report = self.report_path.read_text(encoding="utf-8")
+        self.assertIn("Variant: %s" % self.final.model.variant.id, report)
+        self.assertIn("Expected accuracy on new people (nested CV)", report)
+        self.assertIn("## Comparison on all people", report)
+
+
+@unittest.skipUnless(HAVE_SKLEARN, "numpy/scikit-learn not installed")
 class ModelFileTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

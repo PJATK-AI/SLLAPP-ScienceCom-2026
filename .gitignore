@@ -30,3 +30,6 @@ __pycache__/
 # SPAS dataset and the files supplied with it (license/provenance not confirmed;
 # do not commit datasets)
 model/data/SPAS/
+
+# Trained models and training reports (do not commit model weights)
+model/artifacts/

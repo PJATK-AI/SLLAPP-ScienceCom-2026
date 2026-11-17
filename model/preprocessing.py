@@ -1,4 +1,3 @@
-
 import math
 from collections.abc import Mapping
 from typing import Any, Iterable, List, Sequence, Tuple
@@ -24,7 +23,7 @@ Landmarks = Tuple[Point, ...]
 
 
 class LandmarkValidationError(ValueError):
-    """Raised when landmarks are missing, malformed or not finite."""
+    pass
 
 
 def _coordinate(value: Any, index: int, axis: str) -> float:
@@ -57,7 +56,6 @@ def _point(raw: Any, index: int) -> Point:
 
 
 def validate_landmarks(landmarks: Any) -> Landmarks:
-
     if landmarks is None:
         raise LandmarkValidationError("landmarks are missing")
     if isinstance(landmarks, (str, bytes, Mapping)) or not isinstance(landmarks, Sequence):
@@ -70,7 +68,6 @@ def validate_landmarks(landmarks: Any) -> Landmarks:
 
 
 def center_on_wrist(landmarks: Any) -> Landmarks:
-
     points = validate_landmarks(landmarks)
     wx, wy, wz = points[WRIST]
     return tuple((x - wx, y - wy, z - wz) for x, y, z in points)
@@ -81,7 +78,6 @@ def _norm(point: Point) -> float:
 
 
 def hand_scale(centred: Landmarks, method: str) -> float:
-    """Hand size of wrist-centred landmarks, measured with ``method`` (see ``SCALE_METHODS``)."""
     if method == "none":
         return 1.0
     if method == "wrist_middle_mcp":
@@ -95,11 +91,6 @@ def hand_scale(centred: Landmarks, method: str) -> float:
 
 
 def normalize_scale(centred: Landmarks, method: str) -> Landmarks:
-    """Divide wrist-centred landmarks by the hand size, so the measurement becomes 1.
-
-    Raises :class:`LandmarkValidationError` when the hand size is below
-    ``MIN_HAND_SCALE`` (degenerate detection), instead of dividing by ~0.
-    """
     scale = hand_scale(centred, method)
     if method == "none":
         return centred
@@ -111,7 +102,6 @@ def normalize_scale(centred: Landmarks, method: str) -> Landmarks:
 
 
 def preprocess_landmarks(landmarks: Any, scale_method: str = "none") -> Landmarks:
-    """Shared pipeline: wrist centring, then per-sample scale normalization."""
     if scale_method not in SCALE_METHODS:
         raise ValueError("unknown scale method %r (expected one of %s)"
                          % (scale_method, ", ".join(SCALE_METHODS)))
@@ -121,7 +111,6 @@ def preprocess_landmarks(landmarks: Any, scale_method: str = "none") -> Landmark
 # --- adapters -----------------------------------------------------------------
 
 def preprocess_sample(sample: Any, scale_method: str = "none") -> Landmarks:
-
     return preprocess_landmarks(sample.landmarks, scale_method)
 
 

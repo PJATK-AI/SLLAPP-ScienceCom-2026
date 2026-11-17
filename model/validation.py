@@ -1,20 +1,3 @@
-"""Dataset validation: structure, completeness and landmark sanity.
-
-Python::
-
-    from model import validate_dataset
-    report = validate_dataset()
-    print(report.format())
-    assert report.ok
-
-Command line (from the repository root)::
-
-    python -m model [DATASET_DIR] [--strict-order]
-
-Exit code: 0 = dataset valid, 1 = problems found.
-Structural validation does not confirm that gesture labels are linguistically
-correct PJM signs.
-"""
 import argparse
 import itertools
 import math
@@ -82,20 +65,12 @@ class ValidationReport:
 
 
 class DatasetValidationError(ValueError):
-    """Raised by ``load_dataset`` when the dataset is invalid. ``.report`` has the details."""
-
     def __init__(self, report: ValidationReport):
         self.report = report
         super().__init__("Dataset validation failed:\n" + report.format())
 
 
 def find_order_anomalies(samples: Dict[str, Sample]) -> List[Tuple[str, float, str]]:
-    """Heuristic landmark-order check; returns ``[(sample, robust_z, worst_bone), ...]``.
-
-    Bone lengths (normalised by the wrist -> middle-finger-MCP distance) are compared
-    with the median over all samples. Swapped or shuffled landmarks change the bone
-    lengths sharply. This is a sanity check, not a proof of correct order.
-    """
     ratios: Dict[str, Optional[List[float]]] = {}
     for name, s in samples.items():
         scale = math.dist(s.landmarks[0], s.landmarks[9])
@@ -121,7 +96,6 @@ def find_order_anomalies(samples: Dict[str, Sample]) -> List[Tuple[str, float, s
 
 
 def validate_dataset(path=None, *, strict_order: bool = False) -> ValidationReport:
-    """Validate the dataset and return a full report (does not raise on bad data)."""
     dataset_dir = get_dataset_dir(path)
     if not os.path.isdir(dataset_dir):
         check = CheckResult("Dataset directory exists", False, ["not a directory: %s" % dataset_dir])
@@ -198,7 +172,7 @@ def validate_dataset(path=None, *, strict_order: bool = False) -> ValidationRepo
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m model", description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(prog="python -m model", description="Dataset validation: structure, completeness and landmark sanity.")
     ap.add_argument("dataset", nargs="?", default=None,
                     help="dataset folder (default: $SLLAPP_DATASET_DIR or model/data/SPAS/dataset)")
     ap.add_argument("--strict-order", action="store_true",
