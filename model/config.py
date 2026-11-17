@@ -19,6 +19,21 @@ N_LANDMARKS = 21
 SAMPLES_PER_LETTER = N_SUBJECTS * N_REPETITIONS          # 60
 N_SAMPLES = N_LETTERS * SAMPLES_PER_LETTER               # 960
 
+# --- preprocessing variants and training -------------------------------------
+#: Smallest accepted hand size after wrist centring (SPAS x/y are image-normalised, so a real
+#: wrist -> middle MCP distance is roughly 0.05-0.3). Smaller values mean a degenerate detection.
+MIN_HAND_SCALE = 1e-6
+
+#: Variant used when training a model for inference and when none is given on the CLI.
+DEFAULT_VARIANT = "V3"
+
+#: Classifiers compared for every variant (keys of ``model.training.CLASSIFIERS``).
+DEFAULT_CLASSIFIERS: Tuple[str, ...] = ("logreg", "svm", "knn", "random_forest")
+
+#: Cross-validation: folds grouped by subject, so no signer is in train and test at once.
+CV_SPLITS = 6
+RANDOM_SEED = 42
+
 # Landmark order, identical to MediaPipe Hands (index = position in the file's lists).
 LANDMARK_NAMES: Tuple[str, ...] = (
     "WRIST",

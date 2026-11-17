@@ -1,8 +1,7 @@
 # AI module (`model/`)
 
-Dataset loading, validation and landmark preprocessing for the SPAS hand-landmark dataset used to train the
-PJM static-sign classifier. Model training and evaluation are **not** part of this
-module yet.
+Dataset loading, validation, landmark preprocessing and the comparison of preprocessing
+variants for the SPAS hand-landmark dataset used to train the PJM static-sign classifier.
 
 Structural validation checks the shape and completeness of the data. It does **not**
 confirm that the gesture labels are linguistically correct PJM signs.
@@ -69,7 +68,13 @@ says the same).
 
 ## Usage
 
-Run all commands from the repository root. Only the Python standard library is needed.
+Run all commands from the repository root. Loading, validation and preprocessing need only the
+Python standard library. Training (`model/training.py`) also needs the packages in
+`model/requirements.txt`:
+
+```
+pip install -r model/requirements.txt
+```
 
 ```python
 from model import load_dataset, validate_dataset
@@ -100,12 +105,68 @@ Current pipeline:
 1. **Wrist centring** (`center_on_wrist`): subtracts landmark 0 (`WRIST`) from all 21 landmarks,
    so the wrist becomes `(0, 0, 0)`. This removes the hand's position in the camera frame. It is
    a translation only: shape, size and orientation (rotation, left/right) are unchanged.
+2. **Scale normalization** (`normalize_scale`, per sample): divides the centred landmarks by a
+   hand-size measurement, so that measurement becomes 1. Choose it with `scale_method`
+   (`preprocess_landmarks(points, scale_method="palm")`; the default `"none"` skips this step).
+   All distances are 3D Euclidean (x, y, z) distances:
+
+   | `scale_method` | hand size |
+   |---|---|
+   | `none` | no scale normalization |
+   | `wrist_middle_mcp` | distance WRIST (0) -> MIDDLE_FINGER_MCP (9) |
+   | `palm` | mean distance WRIST (0) -> the MCPs 5, 9, 13, 17 |
+   | `max_extent` | largest distance of any landmark from WRIST (0); depends on the pose |
+
+   A hand size below `MIN_HAND_SCALE` (`model/config.py`) means a degenerate detection and raises
+   `LandmarkValidationError`; there is no division by ~0. Rotation is not normalized.
 
 Input: exactly 21 landmarks in the order above, each as `(x, y, z)` or `{"x", "y", "z"}`.
 SPAS samples and MediaPipe image landmarks (`coordinateSpace: "MEDIAPIPE_IMAGE"`) use the same
 coordinate space. A wrong landmark count, a missing coordinate or a value that is not a finite
 number raises `LandmarkValidationError` (a `ValueError`) that names the landmark and axis, for
 example `landmark 3: y must be finite, got nan`.
+
+### Preprocessing variants and model comparison
+
+`model/training.py` builds an sklearn `Pipeline` for each variant: `LandmarkPreprocessor` (wrist
+centring + scale normalization, stateless) -> `StandardScaler` (if enabled) -> classifier. The
+pipeline input is the raw 21 landmarks flattened to 63 values. The scaler is a pipeline step, so it
+is fitted on training data only, refitted inside each cross-validation fold, and saved with the model.
+
+| variant | scale normalization | `StandardScaler` |
+|---|---|---|
+| `V0` | none | no |
+| `V1` | none | yes |
+| `V2` | `wrist_middle_mcp` | no |
+| `V3` (default, `DEFAULT_VARIANT`) | `wrist_middle_mcp` | yes |
+| `V4` | `palm` | yes |
+| `V5` | `max_extent` | yes |
+
+Compare variants x classifiers (`logreg`, `svm`, `knn`, `random_forest`) on the same folds. The
+folds are grouped by subject (`GroupKFold`, `CV_SPLITS = 6`), so a signer is never in train and test
+at once. The output is a table of mean +/- std accuracy and macro-F1:
+
+```
+python -m model.training                                   # all variants, all classifiers
+python -m model.training --variants V0 V3 --classifiers svm
+```
+
+Train one variant on all samples and save it for inference (do not commit model files):
+
+```
+python -m model.training --save out/model.joblib --variant V3 --classifier svm
+```
+
+```python
+from model.training import load_model
+
+model = load_model("out/model.joblib", expected_variant="V3")
+letter = model.predict_hand(message["hand"])   # same preprocessing and fitted scaler as training
+```
+
+The file stores the variant. `load_model` raises `VariantMismatchError` if it differs from
+`expected_variant` or from the current definition of that variant. Model files are pickles
+(joblib): load only files that you created.
 
 ### Run the validation
 

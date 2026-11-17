@@ -19,8 +19,11 @@ from .config import (
 )
 from .dataset import Sample, load_dataset
 from .preprocessing import (
+    SCALE_METHODS,
     LandmarkValidationError,
     center_on_wrist,
+    hand_scale,
+    normalize_scale,
     preprocess_hand,
     preprocess_landmarks,
     preprocess_sample,
@@ -34,11 +37,14 @@ __all__ = [
     "LANDMARK_NAMES",
     "DatasetValidationError",
     "LandmarkValidationError",
+    "SCALE_METHODS",
     "Sample",
     "ValidationReport",
     "center_on_wrist",
     "get_dataset_dir",
+    "hand_scale",
     "load_dataset",
+    "normalize_scale",
     "preprocess_hand",
     "preprocess_landmarks",
     "preprocess_sample",
