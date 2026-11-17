@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-
-const count = ref(0);
+import SessionPanel from './components/SessionPanel.vue';
 </script>
-
 <template>
     <main>
         <h1>SLLAPP</h1>
-        <button type="button" @click="count++">Clicked {{ count }} times</button>
+        <SessionPanel />
     </main>
 </template>
