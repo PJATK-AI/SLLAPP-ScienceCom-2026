@@ -51,7 +51,7 @@ words; substrings within other words are accepted. This is a word filter, not
 full moderation.
 
 The backend reads the blocked-word list once at startup from
-`sllapp.session.blocked-words-location`. The default file,
+`sllapp.moderation.blocked-words-location`. The default file,
 `backend/src/main/resources/moderation/blocked-words.txt`, contains Polish and
 English words adapted from LDNOOBW under CC BY 4.0; `SOURCES.md` in the same
 directory gives the source and the changes. The file is UTF-8, with one word
@@ -184,7 +184,7 @@ open so the client can correct its request:
 | Spring property | Default | Meaning |
 | --- | --- | --- |
 | `sllapp.session.creation-ttl` | `5m` | Fixed lifetime from session creation; must be positive |
-| `sllapp.session.blocked-words-location` | `classpath:moderation/blocked-words.txt` | Blocked-word file; must start with `classpath:` or `file:` |
+| `sllapp.moderation.blocked-words-location` | `classpath:moderation/blocked-words.txt` | Blocked-word file; must start with `classpath:` or `file:` |
 | `sllapp.websocket.max-message-bytes` | `65536` | Application limit for text, in UTF-8 bytes |
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
 | `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
