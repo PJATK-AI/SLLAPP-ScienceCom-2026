@@ -1,6 +1,6 @@
 # AI module (`model/`)
 
-Dataset loading and validation for the SPAS hand-landmark dataset used to train the
+Dataset loading, validation and landmark preprocessing for the SPAS hand-landmark dataset used to train the
 PJM static-sign classifier. Model training and evaluation are **not** part of this
 module yet.
 
@@ -80,6 +80,32 @@ print(report.format())
 samples = load_dataset()           # list[Sample]; raises DatasetValidationError if invalid
 samples[0].label, samples[0].subject, samples[0].repetition, samples[0].landmarks  # 21 x (x, y, z)
 ```
+
+### Preprocessing (training and inference)
+
+`model/preprocessing.py` holds the preprocessing that every hand goes through. Training and
+inference call the same pipeline, `preprocess_landmarks`, through two thin adapters:
+
+```python
+from model import load_dataset, preprocess_samples, preprocess_hand
+
+X = preprocess_samples(load_dataset())   # training: list of 21 x (x, y, z), one per sample
+x = preprocess_hand(message["hand"])     # inference: the `hand` of a `hand_sample` message
+```
+
+Add new steps (for example scaling) to `preprocess_landmarks`, never to one adapter only.
+
+Current pipeline:
+
+1. **Wrist centring** (`center_on_wrist`): subtracts landmark 0 (`WRIST`) from all 21 landmarks,
+   so the wrist becomes `(0, 0, 0)`. This removes the hand's position in the camera frame. It is
+   a translation only: shape, size and orientation (rotation, left/right) are unchanged.
+
+Input: exactly 21 landmarks in the order above, each as `(x, y, z)` or `{"x", "y", "z"}`.
+SPAS samples and MediaPipe image landmarks (`coordinateSpace: "MEDIAPIPE_IMAGE"`) use the same
+coordinate space. A wrong landmark count, a missing coordinate or a value that is not a finite
+number raises `LandmarkValidationError` (a `ValueError`) that names the landmark and axis, for
+example `landmark 3: y must be finite, got nan`.
 
 ### Run the validation
 
