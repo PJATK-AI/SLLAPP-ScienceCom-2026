@@ -18,3 +18,15 @@ CLAUDE.md
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# SPAS dataset and the files supplied with it (license/provenance not confirmed;
+# do not commit datasets)
+model/data/SPAS/
