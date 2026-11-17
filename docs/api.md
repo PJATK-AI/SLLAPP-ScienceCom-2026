@@ -238,3 +238,25 @@ with `Content-Type: application/problem+json`. For example, `?limit=101` returns
   "instance": "/api/ranking"
 }
 ```
+
+## Frontend session client
+
+`useGameSession` in `frontend/apps/web/src/composables/game-session/` owns one
+WebSocket connection. Configure its URL through `VITE_WS_URL` or the `url`
+option; `timeoutMs` overrides the default 10000 ms operation timeout.
+It exposes readonly connection status, pending action, readiness, the latest
+validated game state, errors, closure information and sample diagnostics.
+
+Call `createSession({ nickname, selectedHand })`, `disconnect()` and `reconnect()`
+for session lifecycle. `sendHandSample(hand)` and `sendNoHand()` add the current
+`positionId` and a shared sequence starting at zero. A true result means that
+`WebSocket.send` accepted the message, not that the server acknowledged it.
+Samples are discarded while unconfirmed, disconnected or when the socket already
+has buffered data; there is no application queue. Sample acknowledgements do not
+control sending. Hand payloads use protocol `LEFT`/`RIGHT` and retain extra fields;
+the client does not mirror, scale or otherwise transform coordinates.
+
+The composable releases listeners, timers and the socket when its Vue scope is
+disposed, or when `dispose()` is called. Events from replaced sockets cannot
+change the current state. Session data is held only in memory. The current
+frontend validates the implemented `CREATED` state with explicit `positionId:null`.

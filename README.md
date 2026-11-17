@@ -36,8 +36,9 @@ maintained by PJATK AI.
 
 The backend creates player sessions over WebSocket, validates hand samples,
 stores game results and serves an ordered ranking over REST. The
-frontend workspace contains a Vue application scaffold, a MediaPipe hand tracker
-and its Vue wrapper. The web application displays an interactive counter.
+frontend workspace contains a Vue WebSocket session test panel, a MediaPipe hand
+tracker and its Vue wrapper. The panel creates and resumes sessions and sends
+synthetic hand samples for transport testing.
 
 | Component | Technologies |
 | --- | --- |
@@ -96,6 +97,25 @@ Open the local URL printed by Vite.
 
 ## Usage
 
+### Frontend WebSocket test panel
+
+Set `VITE_WS_URL=ws://127.0.0.1:8080/ws` in `frontend/apps/web/.env.local`
+(using `frontend/.env.example`) and restart Vite. The page provides a nickname
+and hand selection, session creation, disconnect and manual resume controls.
+An open socket is ready to send samples only after the server confirms the session.
+
+The sample buttons send one synthetic 21-point hand or one `no_hand` message.
+They test transport, not camera tracking or gesture recognition. The panel shows
+session ID, connection status, the last sent sequence and optional `sample_ack`.
+Enable `sllapp.websocket.diagnostic-mode=true` on the backend to see acknowledgements.
+Sending also works when acknowledgements are disabled.
+
+Reconnection retains the session ID in memory and resets the sample sequence
+on the new confirmed connection. Reloading the page loses that ID. Closure code
+1008 clears an expired or unavailable session and enables creating another one.
+The client waits up to 10 seconds for connection opening and another 10 seconds
+for session confirmation. It does not reconnect automatically.
+
 ### Open a WebSocket session
 
 With the backend running, use a browser console on the local Vite page:
@@ -144,7 +164,7 @@ saved results.
 | Path | Contents |
 | --- | --- |
 | `backend/` | Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
-| `frontend/apps/web/` | Vue application scaffold |
+| `frontend/apps/web/` | Vue session test panel, WebSocket client and ranking API client |
 | `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
 | `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
 | `docs/` | API reference, backend architecture and project workflow |
