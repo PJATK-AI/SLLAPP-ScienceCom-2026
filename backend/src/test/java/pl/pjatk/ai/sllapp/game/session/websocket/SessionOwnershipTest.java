@@ -12,10 +12,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockMakers;
+import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import pl.pjatk.ai.sllapp.game.session.MutableClock;
+import pl.pjatk.ai.sllapp.game.session.BlockedWordList;
 import pl.pjatk.ai.sllapp.game.session.NicknamePolicy;
 import pl.pjatk.ai.sllapp.game.session.SessionProperties;
 import pl.pjatk.ai.sllapp.game.session.SessionRegistry;
@@ -31,8 +33,9 @@ import static org.mockito.Mockito.withSettings;
 
 class SessionOwnershipTest {
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SessionProperties properties = new SessionProperties(Duration.ofMinutes(5), List.of());
-    private final SessionRegistry registry = new SessionRegistry(new MutableClock(), properties, new NicknamePolicy(properties));
+    private final SessionProperties properties = new SessionProperties(Duration.ofMinutes(5), "classpath:moderation/test-blocked-words.txt");
+    private final SessionRegistry registry = new SessionRegistry(new MutableClock(), properties,
+            new NicknamePolicy(new BlockedWordList(properties, new DefaultResourceLoader())));
     private final SessionWebSocketHandler handler = new SessionWebSocketHandler(mapper,
             new SessionWebSocketProperties(65536, 262144, true), registry, new SampleMessageValidator());
 

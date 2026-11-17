@@ -1,13 +1,15 @@
 package pl.pjatk.ai.sllapp.game.session;
 
 import java.time.Duration;
-import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class NicknamePolicyTest {
-    private final NicknamePolicy policy = new NicknamePolicy(new SessionProperties(Duration.ofMinutes(5), List.of("bad")));
+    private final NicknamePolicy policy = new NicknamePolicy(new BlockedWordList(
+            new SessionProperties(Duration.ofMinutes(5), "classpath:moderation/test-blocked-words.txt"),
+            new DefaultResourceLoader()));
 
     @Test
     void trimsAndCountsUnicodeCodePoints() {
