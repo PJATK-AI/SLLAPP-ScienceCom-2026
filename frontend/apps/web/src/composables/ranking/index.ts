@@ -1,2 +1,2 @@
 export { provideRanking } from './provide-ranking';
-export { useRanking } from './use-raking';
+export { useRanking } from './use-ranking';

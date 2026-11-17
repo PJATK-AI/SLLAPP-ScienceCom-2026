@@ -1,5 +1,5 @@
 import { inject } from 'vue';
-import { RankingKey } from './inject';
+import { RankingKey } from './key';
 
 export function useRanking() {
     const context = inject(RankingKey);

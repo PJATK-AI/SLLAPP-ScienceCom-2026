@@ -1,14 +1,14 @@
 import { fetchRanking } from '@/api';
 import { provide, ref } from 'vue';
-import { RankingKey, type RankingContext } from './inject';
-import type { Ranking } from '@/models';
+import { RankingKey, type RankingContext } from './key';
+import type { RankingRrecord } from '@/models';
 
-export function provideRanking(limit: number = 10) {
-    const ranking = ref<null | Ranking>();
+export function provideRanking() {
+    const ranking = ref<RankingRrecord[]>([]);
     const isLoading = ref(false);
     const error = ref(null);
 
-    const loadRanking = async () => {
+    const loadRanking = async (limit?: number) => {
         isLoading.value = true;
 
         try {

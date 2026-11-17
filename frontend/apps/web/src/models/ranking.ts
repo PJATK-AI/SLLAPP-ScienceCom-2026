@@ -1,2 +1,5 @@
-export interface Ranking {}
-// TODO: specify this type
+export type RankingRrecord = {
+    rank: number;
+    nickname: string;
+    score: number;
+};

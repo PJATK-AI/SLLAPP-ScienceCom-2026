@@ -1,1 +1,1 @@
-export type { Ranking } from './ranking';
+export type { RankingRrecord } from './ranking';

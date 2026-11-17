@@ -1,7 +1,8 @@
+import type { RankingRrecord } from '@/models';
 import type { InjectionKey, Ref } from 'vue';
 
 export interface RankingContext {
-    ranking: Ref<any>;
+    ranking: Ref<RankingRrecord[]>;
     isLoading: Ref<boolean>;
     error: Ref<string | null>;
     loadRanking: () => Promise<void>;
