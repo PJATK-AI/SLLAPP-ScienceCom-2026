@@ -73,6 +73,17 @@ The server listens on **http://127.0.0.1:8080**.
 
 ### Start the frontend
 
+The web application reads the backend REST API address from
+`VITE_API_BASE_URL`. [`frontend/.env.example`](frontend/.env.example) shows the
+value for the local backend. Vite loads environment files from
+`frontend/apps/web/`, so put the variable in `frontend/apps/web/.env.local`:
+
+```sh
+cp frontend/.env.example frontend/apps/web/.env.local
+```
+
+When the variable is missing, API calls fail with a configuration error.
+
 In a second terminal, from the repository root, run:
 
 ```sh
