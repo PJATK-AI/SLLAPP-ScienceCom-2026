@@ -1,24 +1,35 @@
 import { fetchRanking } from '@/api';
+import type { RankingEntry } from '@/models';
 import { provide, ref } from 'vue';
 import { RankingKey, type RankingContext } from './key';
-import type { RankingRrecord } from '@/models';
 
-export function provideRanking() {
-    const ranking = ref<RankingRrecord[]>([]);
+export function provideRanking(): RankingContext {
+    const ranking = ref<RankingEntry[]>([]);
     const isLoading = ref(false);
-    const error = ref(null);
+    const error = ref<string | null>(null);
+    // Only the latest request may change the state, so an older response cannot overwrite a newer one.
+    let latestRequest = 0;
 
-    const loadRanking = async (limit?: number) => {
+    async function loadRanking(limit?: number): Promise<void> {
+        const request = ++latestRequest;
         isLoading.value = true;
+        error.value = null;
 
         try {
-            ranking.value = await fetchRanking(limit);
-        } catch (e: any) {
-            error.value = e?.message || 'Failed to fetch ranking';
+            const entries = await fetchRanking(limit);
+            if (request === latestRequest) {
+                ranking.value = entries;
+            }
+        } catch (cause) {
+            if (request === latestRequest) {
+                error.value = cause instanceof Error ? cause.message : 'Failed to fetch ranking';
+            }
         } finally {
-            isLoading.value = false;
+            if (request === latestRequest) {
+                isLoading.value = false;
+            }
         }
-    };
+    }
 
     const context: RankingContext = {
         ranking,
