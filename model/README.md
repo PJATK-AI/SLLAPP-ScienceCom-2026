@@ -143,13 +143,34 @@ is fitted on training data only, refitted inside each cross-validation fold, and
 | `V5` | `max_extent` | yes |
 
 Compare variants x classifiers (`logreg`, `svm`, `knn`, `random_forest`) on the same folds. The
-folds are grouped by subject (`GroupKFold`, `CV_SPLITS = 6`), so a signer is never in train and test
-at once. The output is a table of mean +/- std accuracy and macro-F1:
+dataset is divided by people: `KFold(n_splits=4, shuffle=True, random_state=42)` splits the 12
+subject ids (`CV_SPLITS`, `RANDOM_SEED` in `model/config.py`), and each sample follows its subject.
+Every fold trains on 9 people (720 samples) and validates on 3 people (240 samples), 75/25; every
+person is in validation exactly once. The output is a table of mean +/- std validation accuracy and
+macro-F1 over the 4 folds:
 
 ```
 python -m model.training                                   # all variants, all classifiers
 python -m model.training --variants V0 V3 --classifiers svm
 ```
+
+The table above is good for choosing a variant, but the best score in it is optimistic: the same
+validation people are used to pick the winner. For an unbiased estimate of accuracy on new people,
+run nested cross-validation:
+
+```
+python -m model.training --nested
+```
+
+- Outer loop: the same 4 folds by people (9 train / 3 test people).
+- Inner loop: on the 9 outer training people only, the variant x classifier comparison runs with
+  `KFold` over those people (`INNER_CV_SPLITS = 3`: 6 train / 3 validation people) and the
+  combination with the highest mean validation accuracy is chosen.
+- The chosen pipeline is refitted on the 9 outer training people and scored once on the 3 test
+  people, who are never used for selection, scaling or fitting.
+
+The output lists the choice and test score of each outer fold and the mean +/- std over the 4 folds.
+That mean estimates the whole procedure "compare the variants and keep the best", not one fixed variant.
 
 Train one variant on all samples and save it for inference (do not commit model files):
 

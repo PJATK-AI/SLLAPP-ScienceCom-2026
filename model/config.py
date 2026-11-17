@@ -30,8 +30,11 @@ DEFAULT_VARIANT = "V3"
 #: Classifiers compared for every variant (keys of ``model.training.CLASSIFIERS``).
 DEFAULT_CLASSIFIERS: Tuple[str, ...] = ("logreg", "svm", "knn", "random_forest")
 
-#: Cross-validation: folds grouped by subject, so no signer is in train and test at once.
-CV_SPLITS = 6
+#: Cross-validation: KFold over the 12 people, so no person is in train and validation at once.
+#: 4 splits = 9 people train / 3 people validation (75/25) in each fold.
+CV_SPLITS = 4
+#: Nested CV inner loop: KFold over the 9 outer training people = 6 train / 3 validation people.
+INNER_CV_SPLITS = 3
 RANDOM_SEED = 42
 
 # Landmark order, identical to MediaPipe Hands (index = position in the file's lists).
