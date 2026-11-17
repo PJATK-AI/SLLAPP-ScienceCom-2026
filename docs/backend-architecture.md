@@ -18,7 +18,8 @@ JDK HTTP and WebSocket clients.
 `game.session.GameSession` is an immutable player session with UUID, nickname,
 selected hand and creation/expiry timestamps. `SessionRegistry` holds sessions
 in memory and uses the injected UTC `Clock` to check expiry. `NicknamePolicy`
-validates player names. These classes do not depend on WebSocket objects.
+validates player names. It uses `BlockedWordList`, which reads the blocked-word
+file from `sllapp.session.blocked-words-location` once at startup. These classes do not depend on WebSocket objects.
 The handler implements `create_session` and `resume_session`; its connection
 registry keeps Spring sockets separate from player data. Ownership changes are
 serialized per game session. Closing an old socket cannot detach its replacement.
@@ -79,6 +80,7 @@ backend/src/
 │   │   │   │   ├── GameResult.java
 │   │   │   │   └── GameResultRepository.java
 │   │   │   └── session/
+│   │   │       ├── BlockedWordList.java
 │   │   │       ├── GameSession.java
 │   │   │       ├── NicknamePolicy.java
 │   │   │       ├── SelectedHand.java
@@ -98,25 +100,34 @@ backend/src/
 │   │       └── RankingEntryResponse.java
 │   └── resources/
 │       ├── application.yml
+│       ├── moderation/
+│       │   ├── blocked-words.txt
+│       │   ├── LICENSE-LDNOOBW.txt
+│       │   └── SOURCES.md
 │       └── schema.sql
-└── test/java/pl/pjatk/ai/sllapp/
-    ├── game/result/
-    │   └── GameResultRepositoryTest.java
-    ├── game/session/
-    │   ├── MutableClock.java
-    │   ├── NicknamePolicyTest.java
-    │   ├── SessionRegistryTest.java
-    │   └── websocket/
-    │       ├── SampleFixtures.java
-    │       ├── SampleMessageValidatorTest.java
-    │       ├── SessionExpiryTest.java
-    │       ├── SessionOwnershipTest.java
-    │       ├── SessionSamplesTest.java
-    │       ├── SessionWebSocketTest.java
-    │       ├── WebSocketSizeTest.java
-    │       └── WebSocketTestClient.java
-    └── ranking/
-        └── RankingApiTest.java
+└── test/
+    ├── java/pl/pjatk/ai/sllapp/
+    │   ├── game/result/
+    │   │   └── GameResultRepositoryTest.java
+    │   ├── game/session/
+    │   │   ├── BlockedWordListTest.java
+    │   │   ├── MutableClock.java
+    │   │   ├── NicknamePolicyTest.java
+    │   │   ├── SessionRegistryTest.java
+    │   │   └── websocket/
+    │   │       ├── SampleFixtures.java
+    │   │       ├── SampleMessageValidatorTest.java
+    │   │       ├── SessionExpiryTest.java
+    │   │       ├── SessionOwnershipTest.java
+    │   │       ├── SessionSamplesTest.java
+    │   │       ├── SessionWebSocketTest.java
+    │   │       ├── WebSocketSizeTest.java
+    │   │       └── WebSocketTestClient.java
+    │   └── ranking/
+    │       └── RankingApiTest.java
+    └── resources/
+        └── moderation/
+            └── test-blocked-words.txt
 ```
 
 | File | Responsibility |
@@ -127,6 +138,7 @@ backend/src/
 | [`SqliteConfiguration.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/config/SqliteConfiguration.java) | Storage directory creation and SQLite `DataSource` |
 | [`application.yml`](../backend/src/main/resources/application.yml) | Server, storage and schema initialization settings |
 | [`schema.sql`](../backend/src/main/resources/schema.sql) | Result table and ranking index |
+| [`blocked-words.txt`](../backend/src/main/resources/moderation/blocked-words.txt) | Default blocked-word list; source and license in [`SOURCES.md`](../backend/src/main/resources/moderation/SOURCES.md) |
 
 ## Startup and configuration
 
@@ -199,7 +211,11 @@ row limit as a bound SQL parameter. A limit below 1 causes
 The WebSocket tests cover creation, nickname validation, resuming, concurrent
 ownership changes, delayed close callbacks, expiry with a controlled clock,
 sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
-UTF-8 size boundaries, fragmented text and oversized binary messages. Integration
+UTF-8 size boundaries, fragmented text and oversized binary messages.
+`BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
+duplicates, NFKC normalization, the bundled list, and startup errors for missing,
+unreadable, malformed, empty or invalid files and directories. Other session
+tests use the small list in `test-blocked-words.txt`. Integration
 tests use a real embedded server on random ports and temporary SQLite files.
 
 `RankingApiTest` starts the HTTP server on a random port with a temporary SQLite

@@ -44,11 +44,22 @@ The response to `create_session` contains a new UUID and the stored player data:
 ```
 
 The nickname is stripped of leading/trailing Java whitespace and must contain
-1–20 Unicode code points, without control or format characters. The configured
-`sllapp.session.blocked-words` list rejects complete letter sequences after NFKC
+1–20 Unicode code points, without control or format characters. A nickname is
+rejected when one of its letter sequences matches a blocked word after NFKC
 normalization and lowercasing with `Locale.ROOT`. Digits and punctuation separate
-words; substrings within other words are accepted. The default list contains
-common Polish and English profanity. This is a word filter, not full moderation.
+words; substrings within other words are accepted. This is a word filter, not
+full moderation.
+
+The backend reads the blocked-word list once at startup from
+`sllapp.session.blocked-words-location`. The default file,
+`backend/src/main/resources/moderation/blocked-words.txt`, contains Polish and
+English words adapted from LDNOOBW under CC BY 4.0; `SOURCES.md` in the same
+directory gives the source and the changes. The file is UTF-8, with one word
+per line. Blank lines and lines that start with `#` are ignored. Each entry must
+contain only letters and combining marks. The backend does not start when the
+file is missing, unreadable, not valid UTF-8, has an invalid entry or has no
+words.
+
 `selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
 
 ### Resume a session
@@ -173,7 +184,7 @@ open so the client can correct its request:
 | Spring property | Default | Meaning |
 | --- | --- | --- |
 | `sllapp.session.creation-ttl` | `5m` | Fixed lifetime from session creation; must be positive |
-| `sllapp.session.blocked-words` | PL/EN list in `SessionProperties` | Replacement list of blocked words, containing letters and combining marks |
+| `sllapp.session.blocked-words-location` | `classpath:moderation/blocked-words.txt` | Blocked-word file; must start with `classpath:` or `file:` |
 | `sllapp.websocket.max-message-bytes` | `65536` | Application limit for text, in UTF-8 bytes |
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
 | `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
