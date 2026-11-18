@@ -256,6 +256,15 @@ has buffered data; there is no application queue. Sample acknowledgements do not
 control sending. Hand payloads use protocol `LEFT`/`RIGHT` and retain extra fields;
 the client does not mirror, scale or otherwise transform coordinates.
 
+For classifiers that expect right-hand image landmarks, the frontend
+`normalizeHandForModel` helper prepares the 21 original tracker points.
+It applies `x = 1 - x` to the left hand and keeps the right hand's coordinates
+as detected. It preserves point order, y, z, confidence and physical handedness.
+When sending these prepared points, keep the physical label (`LEFT` or `RIGHT`).
+The backend must pass the points to the classifier without a second reflection.
+The model pipeline handles wrist centering and scaling. The helper is available
+for callers to invoke before sending. The session client sends the points it receives.
+
 The composable releases listeners, timers and the socket when its Vue scope is
 disposed, or when `dispose()` is called. Events from replaced sockets cannot
 change the current state. Session data is held only in memory. The current

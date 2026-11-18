@@ -134,6 +134,17 @@ at (0, 0, 0). This translation preserves scale and orientation. Each array has
 its own point objects. The tracker skips detections with missing or invalid
 coordinates and reports `null` if no valid hand remains.
 
+For a classifier trained on right-hand image landmarks, prepare a separate copy
+with `normalizeHandForModel` from `@sllapp/hand-landmarker-vue`:
+
+```ts
+const modelHand = hand.value ? normalizeHandForModel(hand.value) : null;
+```
+
+The function reflects the left hand's horizontal image coordinates and preserves
+the physical hand label. Keep using the original landmarks for the overlay.
+The model pipeline handles wrist centering and scaling.
+
 ### Open a WebSocket session
 
 With the backend running, use a browser console on the local Vite page:
