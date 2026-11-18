@@ -16,7 +16,12 @@ const options: HandTrackerOptions = {
     wasmPath: '/mediapipe/wasm',
 };
 
-const rightHand: Hand = { handedness: 'Right', score: 0.9, landmarks: [{ x: 0, y: 0, z: 0 }] };
+const rightHand: Hand = {
+    handedness: 'Right',
+    score: 0.9,
+    landmarks: Array.from({ length: 21 }, () => ({ x: 0.25, y: 0.5, z: 0 })),
+    wristRelativeLandmarks: Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0 })),
+};
 
 function createFakeTracker() {
     let onResult: (hand: Hand | null, timestamp: number) => void = () => {};
@@ -87,7 +92,7 @@ describe('useHandTracker', () => {
         await start();
 
         tracker.emitResult(rightHand);
-        expect(hand.value).toEqual(rightHand);
+        expect(hand.value).toBe(rightHand);
 
         tracker.emitResult(null);
         expect(hand.value).toBeNull();

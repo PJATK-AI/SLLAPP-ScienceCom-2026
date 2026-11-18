@@ -116,6 +116,24 @@ on the new confirmed connection. Reloading the page loses that ID. Closure code
 The client waits up to 10 seconds for connection opening and another 10 seconds
 for session confirmation. It does not reconnect automatically.
 
+### Read hand landmarks in Vue
+
+`useHandTracker` from `@sllapp/hand-landmarker-vue` exposes the latest selected
+hand through `hand.value`. When a hand is detected, both arrays contain 21
+points in MediaPipe order.
+
+```ts
+const imagePoints = hand.value?.landmarks;
+const wristPoints = hand.value?.wristRelativeLandmarks;
+```
+
+Use the original image points to draw an overlay. Their x and y coordinates are
+normalized to the image, and z is the depth reported by MediaPipe. Wrist-relative
+points subtract landmark 0 from each point on all three axes, so the wrist is
+at (0, 0, 0). This translation preserves scale and orientation. Each array has
+its own point objects. The tracker skips detections with missing or invalid
+coordinates and reports `null` if no valid hand remains.
+
 ### Open a WebSocket session
 
 With the backend running, use a browser console on the local Vite page:
