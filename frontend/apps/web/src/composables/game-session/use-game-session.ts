@@ -10,6 +10,7 @@ export function useGameSession(options: { url?: string; timeoutMs?: number } = {
     const error = shallowRef<SessionError | null>(null);
     const lastClose = shallowRef<{ code: number; reason: string; wasClean: boolean } | null>(null);
     const lastSentSeq = ref<number | null>(null);
+    const lastSentPayload = ref<string | null>(null);
     const lastSampleAck = ref<number | null>(null);
     let socket: WebSocket | null = null;
     let cleanup = () => {};
@@ -101,6 +102,7 @@ export function useGameSession(options: { url?: string; timeoutMs?: number } = {
                     if (!isReady.value) {
                         seq = 0;
                         lastSentSeq.value = null;
+                        lastSentPayload.value = null;
                         lastSampleAck.value = null;
                     }
                     gameState.value = value;
@@ -178,6 +180,7 @@ export function useGameSession(options: { url?: string; timeoutMs?: number } = {
         }
         try {
             socket.send(payload);
+            lastSentPayload.value = payload;
             lastSentSeq.value = seq++;
             return true;
         } catch {
@@ -193,6 +196,7 @@ export function useGameSession(options: { url?: string; timeoutMs?: number } = {
         error.value = null;
         lastClose.value = null;
         lastSentSeq.value = null;
+        lastSentPayload.value = null;
         lastSampleAck.value = null;
     }
     if (getCurrentScope()) onScopeDispose(dispose);
@@ -204,6 +208,7 @@ export function useGameSession(options: { url?: string; timeoutMs?: number } = {
         error: readonly(error),
         lastClose: readonly(lastClose),
         lastSentSeq: readonly(lastSentSeq),
+        lastSentPayload: readonly(lastSentPayload),
         lastSampleAck: readonly(lastSampleAck),
         createSession,
         reconnect,

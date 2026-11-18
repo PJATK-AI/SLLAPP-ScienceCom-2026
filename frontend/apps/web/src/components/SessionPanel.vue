@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useGameSession } from '@/composables/game-session';
 import type { SelectedHand } from '@/models';
 import { createTestHand } from './session-test-hand';
@@ -16,6 +16,7 @@ const {
     error,
     lastClose,
     lastSentSeq,
+    lastSentPayload,
     lastSampleAck,
     createSession,
     reconnect,
@@ -23,6 +24,11 @@ const {
     sendHandSample,
     sendNoHand,
 } = useGameSession();
+const sampleJson = computed(() =>
+    lastSentPayload.value === null
+        ? ''
+        : JSON.stringify(JSON.parse(lastSentPayload.value), null, 2),
+);
 function sample(hand: boolean) {
     if (!gameState.value) return;
     const sent = hand ? sendHandSample(createTestHand(gameState.value.selectedHand)) : sendNoHand();
@@ -83,6 +89,11 @@ function sample(hand: boolean) {
             :send-no-hand="sendNoHand"
             @active="cameraActive = $event"
         />
+        <template v-if="gameState">
+            <h3>Ostatnia wysłana próbka (JSON)</h3>
+            <pre v-if="sampleJson" tabindex="0">{{ sampleJson }}</pre>
+            <p v-else>Oczekiwanie na pierwszą próbkę.</p>
+        </template>
         <button :disabled="!isReady || cameraActive" @click="sample(true)">
             Wyślij testową dłoń
         </button>
@@ -99,6 +110,13 @@ function sample(hand: boolean) {
 </template>
 
 <style scoped>
+pre {
+    max-height: 18rem;
+    overflow: auto;
+    padding: 0.75rem;
+    background: #14221e;
+    color: #f2faf6;
+}
 section {
     max-width: 46rem;
     margin: auto;

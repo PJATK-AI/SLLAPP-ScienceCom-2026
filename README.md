@@ -131,7 +131,9 @@ includes them in the production build. Custom deployments can set
    the `LEFT` label. An empty frame or a frame with only the other hand sends
    `no_hand`. Both messages share the `VITE_HAND_SAMPLE_HZ` limit (default 10
    per second). The client drops intermediate frames and skips a busy socket.
-3. In diagnostic mode, check the last sent sequence and the corresponding
+3. The JSON panel displays the complete last sample sent over the socket from
+   the camera or either test button. Skipped frames leave the displayed sample
+   in place. In diagnostic mode, check the last sent sequence and the corresponding
    `sample_ack` for each type. **Rozłącz** pauses sending and keeps the preview.
    After **Wznów sesję**, the first fresh eligible frame starts the new sequence.
 4. Click **Zatrzymaj kamerę** to release the camera and enable the synthetic
