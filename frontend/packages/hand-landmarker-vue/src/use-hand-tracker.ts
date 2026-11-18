@@ -18,7 +18,7 @@ import {
 } from 'vue';
 
 export interface UseHandTrackerReturn {
-    /** The selected hand in the latest processed frame, or null if no hand is visible. */
+    /** The selected hand with image and wrist-relative landmarks, or null if no hand is visible. */
     hand: Readonly<ShallowRef<Hand | null>>;
     /** True from the call to `start()` until the call to `stop()` or an error. */
     isRunning: Readonly<Ref<boolean>>;

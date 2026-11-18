@@ -3,7 +3,7 @@ import { selectHand } from '../src/select-hand';
 import type { Hand, Handedness } from '../src/models';
 
 function hand(handedness: Handedness, score: number): Hand {
-    return { handedness, score, landmarks: [] };
+    return { handedness, score, landmarks: [], wristRelativeLandmarks: [] };
 }
 
 describe('selectHand', () => {

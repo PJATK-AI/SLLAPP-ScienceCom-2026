@@ -241,12 +241,30 @@ function stopStream(mediaStream: MediaStream): void {
 }
 
 function toHands(result: HandLandmarkerResult): Hand[] {
-    return result.landmarks.map((landmarks, index) => {
+    const hands: Hand[] = [];
+    for (const [index, landmarks] of result.landmarks.entries()) {
+        const wrist = landmarks[0];
+        if (!wrist || landmarks.length !== 21) continue;
+
+        const points = [];
+        for (const point of landmarks) {
+            if (!point || ![point.x, point.y, point.z].every(Number.isFinite)) break;
+            const { x, y, z } = point;
+            points.push({ x, y, z });
+        }
+        if (points.length !== 21) continue;
+
         const category = result.handedness[index]?.[0];
-        return {
+        hands.push({
             handedness: category?.categoryName === 'Left' ? 'Left' : 'Right',
             score: category?.score ?? 0,
-            landmarks: landmarks.map(({ x, y, z }) => ({ x, y, z })),
-        };
-    });
+            landmarks: points,
+            wristRelativeLandmarks: points.map(({ x, y, z }) => ({
+                x: x - wrist.x,
+                y: y - wrist.y,
+                z: z - wrist.z,
+            })),
+        });
+    }
+    return hands;
 }

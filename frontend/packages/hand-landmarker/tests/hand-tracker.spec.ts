@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HandTrackerError, type HandTrackerOptions } from '../src/models';
+import { HandTrackerError, type Hand, type HandTrackerOptions } from '../src/models';
 import { createHandTracker } from '../src/hand-tracker';
 
 const mediapipe = vi.hoisted(() => ({
@@ -21,7 +21,7 @@ const landmark = { x: 0.1, y: 0.2, z: 0.3, visibility: 0 };
 
 function detection(hands: { name: 'Left' | 'Right'; score: number }[]) {
     return {
-        landmarks: hands.map(() => [landmark]),
+        landmarks: hands.map(() => Array.from({ length: 21 }, () => landmark)),
         worldLandmarks: [],
         handednesses: [],
         handedness: hands.map(({ name, score }) => [
@@ -138,7 +138,80 @@ describe('createHandTracker', () => {
 
         expect(landmarker.detectForVideo).toHaveBeenCalledWith(video, expect.any(Number));
         expect(onResult).toHaveBeenCalledWith(
-            { handedness: 'Left', score: 0.6, landmarks: [{ x: 0.1, y: 0.2, z: 0.3 }] },
+            expect.objectContaining({ handedness: 'Left', score: 0.6 }),
+            expect.any(Number),
+        );
+    });
+
+    it('centers each frame on the wrist of the selected hand', async () => {
+        const pointsAt = (origin: number) =>
+            Array.from({ length: 21 }, (_, i) =>
+                Object.freeze({
+                    x: origin + i / 100,
+                    y: origin - i / 200,
+                    z: -origin + i / 300,
+                    visibility: 0,
+                }),
+            );
+        const result = detection([
+            { name: 'Right', score: 0.9 },
+            { name: 'Left', score: 0.6 },
+        ]);
+        const first = pointsAt(0.25);
+        const second = pointsAt(0.65);
+        landmarker.detectForVideo
+            .mockReturnValueOnce({ ...result, landmarks: [pointsAt(0.4), first] })
+            .mockReturnValueOnce({ ...result, landmarks: [pointsAt(0.2), second] });
+        const tracker = createHandTracker({ ...options, preferredHand: 'Left' });
+        const onResult = vi.fn<(hand: Hand | null, timestamp: number) => void>();
+        tracker.onResult(onResult);
+        await tracker.start(video);
+        runFrame();
+        runFrame();
+
+        for (const [frame, original] of [first, second].entries()) {
+            const hand = onResult.mock.calls[frame]?.[0];
+            expect(hand?.handedness).toBe('Left');
+            expect(hand?.wristRelativeLandmarks).toHaveLength(21);
+            expect(hand?.wristRelativeLandmarks[0]).toEqual({ x: 0, y: 0, z: 0 });
+            expect(hand?.landmarks).toEqual(original.map(({ x, y, z }) => ({ x, y, z })));
+            hand?.wristRelativeLandmarks.forEach((point, i) => {
+                expect(point.x).toBeCloseTo(i / 100);
+                expect(point.y).toBeCloseTo(-i / 200);
+                expect(point.z).toBeCloseTo(i / 300);
+                expect(point).not.toBe(hand.landmarks[i]);
+            });
+        }
+    });
+
+    it('skips malformed hands and continues processing later frames', async () => {
+        const result = detection([
+            { name: 'Left', score: 0.9 },
+            { name: 'Right', score: 0.6 },
+        ]);
+        const valid = result.landmarks[1]!;
+        const nonFinite = [...valid.slice(0, -1), { ...landmark, x: NaN }];
+        landmarker.detectForVideo
+            .mockReturnValueOnce({ ...result, landmarks: [nonFinite, valid] })
+            .mockReturnValueOnce({ ...result, landmarks: [[landmark], nonFinite] })
+            .mockReturnValueOnce(result);
+        const tracker = createHandTracker({ ...options, preferredHand: 'Left' });
+        const onResult = vi.fn();
+        tracker.onResult(onResult);
+        await tracker.start(video);
+        runFrame();
+        runFrame();
+        runFrame();
+
+        expect(onResult).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({ handedness: 'Right' }),
+            expect.any(Number),
+        );
+        expect(onResult).toHaveBeenNthCalledWith(2, null, expect.any(Number));
+        expect(onResult).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({ handedness: 'Left' }),
             expect.any(Number),
         );
     });
