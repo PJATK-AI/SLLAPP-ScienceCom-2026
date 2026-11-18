@@ -83,6 +83,23 @@ afterEach(() => {
 });
 
 describe('createHandTracker', () => {
+    it('releases the camera and reports a detection failure without producing a frame', async () => {
+        landmarker.detectForVideo.mockImplementationOnce(() => {
+            throw new Error('Detection failed');
+        });
+        const tracker = createHandTracker(options);
+        const failure = vi.fn();
+        const result = vi.fn();
+        tracker.onError(failure);
+        tracker.onResult(result);
+        await tracker.start(video);
+        runFrame();
+        expect(failure).toHaveBeenCalledWith(expect.objectContaining({ code: 'detection-failed' }));
+        expect(result).not.toHaveBeenCalled();
+        expect(track.stop).toHaveBeenCalledOnce();
+        expect(frames.size).toBe(0);
+    });
+
     it('loads the model from the paths that the application gives', async () => {
         const tracker = createHandTracker(options);
         await tracker.start(video);

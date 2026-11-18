@@ -58,7 +58,16 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
         ) {
             lastVideoTime = video.currentTime;
             const timestamp = performance.now();
-            const result = landmarker.detectForVideo(video, timestamp);
+            let result: HandLandmarkerResult;
+            try {
+                result = landmarker.detectForVideo(video, timestamp);
+            } catch (cause) {
+                stop();
+                reportError(
+                    new HandTrackerError('detection-failed', 'Hand detection failed.', { cause }),
+                );
+                return;
+            }
             const hand = selectHand(toHands(result), options.preferredHand);
             for (const callback of resultCallbacks) {
                 callback(hand, timestamp);

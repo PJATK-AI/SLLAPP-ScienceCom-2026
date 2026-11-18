@@ -1,4 +1,5 @@
-export type HandTrackerErrorCode = 'model-load-failed' | 'camera-unavailable' | 'camera-denied';
+export type HandTrackerErrorCode =
+    'model-load-failed' | 'camera-unavailable' | 'camera-denied' | 'detection-failed';
 
 export class HandTrackerError extends Error {
     readonly code: HandTrackerErrorCode;
