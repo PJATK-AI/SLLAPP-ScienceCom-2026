@@ -1,4 +1,5 @@
 dist/
+apps/web/public/mediapipe/
 coverage/
 .turbo/
 pnpm-lock.yaml
