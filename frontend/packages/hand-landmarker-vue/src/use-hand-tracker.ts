@@ -40,16 +40,19 @@ export interface UseHandTrackerReturn {
 export function useHandTracker(
     video: MaybeRefOrGetter<HTMLVideoElement | null | undefined>,
     options: HandTrackerOptions,
+    onFrame?: (hand: Hand | null, timestamp: number) => void,
 ): UseHandTrackerReturn {
     const tracker = createHandTracker(options);
     const hand = shallowRef<Hand | null>(null);
     const isRunning = ref(false);
     const error = shallowRef<HandTrackerError | null>(null);
 
-    tracker.onResult((result) => {
+    const unsubscribeResult = tracker.onResult((result, timestamp) => {
+        if (!isRunning.value) return;
         hand.value = result;
+        onFrame?.(result, timestamp);
     });
-    tracker.onError((trackerError) => {
+    const unsubscribeError = tracker.onError((trackerError) => {
         error.value = trackerError;
         isRunning.value = false;
         hand.value = null;
@@ -92,8 +95,11 @@ export function useHandTracker(
 
     if (getCurrentScope()) {
         onScopeDispose(() => {
+            unsubscribeResult();
+            unsubscribeError();
             tracker.dispose();
             isRunning.value = false;
+            hand.value = null;
         });
     }
 
