@@ -43,7 +43,7 @@ function createFakeTracker() {
             onError = callback;
             return () => {};
         }),
-        emitResult: (hand: Hand | null) => onResult(hand, 0),
+        emitResult: (hand: Hand | null, timestamp = 0) => onResult(hand, timestamp),
         fail(error: HandTrackerError) {
             tracker.start.mockImplementationOnce(async () => {
                 tracker.isRunning = false;
@@ -66,14 +66,31 @@ afterEach(() => {
     core.createHandTracker.mockReset();
 });
 
-function setup() {
+function setup(onFrame?: (hand: Hand | null, timestamp: number) => void) {
     const video = ref<HTMLVideoElement | null>(document.createElement('video'));
     const scope = effectScope();
-    const result = scope.run(() => useHandTracker(video, options))!;
+    const result = scope.run(() => useHandTracker(video, options, onFrame))!;
     return { video, scope, ...result };
 }
 
 describe('useHandTracker', () => {
+    it('forwards each processed frame, including consecutive empty frames', async () => {
+        const frame = vi.fn();
+        const { start, stop, scope } = setup(frame);
+        await start();
+        tracker.emitResult(null, 10);
+        tracker.emitResult(null, 20);
+        stop();
+        tracker.emitResult(rightHand, 30);
+        tracker.fail(new HandTrackerError('camera-denied', 'Denied'));
+        await start();
+        scope.stop();
+        expect(frame.mock.calls).toEqual([
+            [null, 10],
+            [null, 20],
+        ]);
+    });
+
     it('creates the tracker with the given options', () => {
         setup();
         expect(core.createHandTracker).toHaveBeenCalledWith(options);
