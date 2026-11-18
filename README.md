@@ -123,7 +123,9 @@ includes them in the production build. Custom deployments can set
 
 1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
    hand and create a session. After confirmation, click **Uruchom kamerę** and
-   allow camera access. The video shows the camera preview.
+   allow camera access. The preview marks the 21 detected landmarks on the selected
+   hand using the original camera coordinates. The dots disappear when that hand
+   leaves the frame.
 2. Show the selected hand. Each eligible frame sends `hand_sample` with 21
    image landmarks. For the left hand the client reflects x once and keeps
    the `LEFT` label. An empty frame or a frame with only the other hand sends

@@ -18,12 +18,16 @@ vi.mock('@sllapp/hand-landmarker-vue', async (original) => ({
 function mockCamera() {
     let frame!: (hand: Hand | null, timestamp: number) => void;
     const running = ref(false);
+    const hand = shallowRef<Hand | null>(null);
     const stop = vi.fn(() => {
         running.value = false;
     });
     camera.tracker.mockImplementation(
         (_video, _options: HandTrackerOptions, callback: typeof frame) => {
-            frame = callback;
+            frame = (result, timestamp) => {
+                hand.value = result;
+                callback(result, timestamp);
+            };
             onScopeDispose(stop);
             return {
                 start: async () => {
@@ -31,7 +35,7 @@ function mockCamera() {
                 },
                 stop,
                 isRunning: running,
-                hand: shallowRef(null),
+                hand,
                 error: shallowRef(null),
             } satisfies UseHandTrackerReturn;
         },
@@ -149,8 +153,17 @@ it.each(['LEFT', 'RIGHT'] as const)(
             wristRelativeLandmarks: [],
         };
         tracker.frame(hand, 0);
+        await nextTick();
+        const points = () => wrapper.findAll('.landmarks span');
+        expect(points()).toHaveLength(21);
+        expect(points()[0]!.attributes('style')).toContain('left: 25%');
+        expect(points()[0]!.attributes('style')).toContain('top: 40%');
         tracker.frame(null, interval - 1);
+        await nextTick();
+        expect(points()).toHaveLength(0);
         tracker.frame({ ...hand, handedness: preferred === 'Left' ? 'Right' : 'Left' }, interval);
+        await nextTick();
+        expect(points()).toHaveLength(0);
         socket.bufferedAmount = 1;
         tracker.frame(hand, 2 * interval);
         socket.bufferedAmount = 0;
