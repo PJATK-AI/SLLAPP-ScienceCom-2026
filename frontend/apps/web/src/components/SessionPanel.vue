@@ -3,6 +3,8 @@ import { ref } from 'vue';
 import { useGameSession } from '@/composables/game-session';
 import type { SelectedHand } from '@/models';
 import { createTestHand } from './session-test-hand';
+import CameraTrackingPanel from './CameraTrackingPanel.vue';
+const cameraActive = ref(false);
 const nickname = ref('');
 const selectedHand = ref<SelectedHand>('RIGHT');
 const feedback = ref('');
@@ -72,8 +74,21 @@ function sample(hand: boolean) {
             <dt>Ostatni sample_ack</dt>
             <dd data-testid="ack-seq">{{ lastSampleAck ?? '—' }}</dd>
         </dl>
-        <button :disabled="!isReady" @click="sample(true)">Wyślij testową dłoń</button>
-        <button :disabled="!isReady" @click="sample(false)">Wyślij brak dłoni</button>
+        <CameraTrackingPanel
+            v-if="gameState"
+            :key="gameState.sessionId"
+            :ready="isReady"
+            :selected-hand="gameState.selectedHand"
+            :send-hand-sample="sendHandSample"
+            :send-no-hand="sendNoHand"
+            @active="cameraActive = $event"
+        />
+        <button :disabled="!isReady || cameraActive" @click="sample(true)">
+            Wyślij testową dłoń
+        </button>
+        <button :disabled="!isReady || cameraActive" @click="sample(false)">
+            Wyślij brak dłoni
+        </button>
         <p aria-live="polite">{{ feedback }}</p>
         <p>Testowa dłoń to syntetyczne 21 punktów. Ten panel sprawdza transport danych.</p>
         <p>
