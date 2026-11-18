@@ -90,6 +90,7 @@ In a second terminal, from the repository root, run:
 ```sh
 cd frontend
 pnpm install --frozen-lockfile
+pnpm prepare:camera
 pnpm dev
 ```
 
@@ -109,6 +110,34 @@ They test transport, not camera tracking or gesture recognition. The panel shows
 session ID, connection status, the last sent sequence and optional `sample_ack`.
 Enable `sllapp.websocket.diagnostic-mode=true` on the backend to see acknowledgements.
 Sending also works when acknowledgements are disabled.
+
+### Stream hand landmarks from the camera
+
+Run `pnpm prepare:camera` from `frontend/` after installing dependencies and
+before starting Vite or building the web app. It downloads version 1 of Google's
+float16 Hand Landmarker and copies the WASM runtime from the installed MediaPipe
+package to `apps/web/public/mediapipe/`. Vite serves these files locally and
+includes them in the production build. Custom deployments can set
+`VITE_HAND_LANDMARKER_MODEL_URL` to the model file and
+`VITE_HAND_LANDMARKER_WASM_PATH` to the matching runtime directory.
+
+1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
+   hand and create a session. After confirmation, click **Uruchom kamerę** and
+   allow camera access. The video shows the camera preview.
+2. Show the selected hand. Each eligible frame sends `hand_sample` with 21
+   image landmarks. For the left hand the client reflects x once and keeps
+   the `LEFT` label. An empty frame or a frame with only the other hand sends
+   `no_hand`. Both messages share the `VITE_HAND_SAMPLE_HZ` limit (default 10
+   per second). The client drops intermediate frames and skips a busy socket.
+3. In diagnostic mode, check the last sent sequence and the corresponding
+   `sample_ack` for each type. **Rozłącz** pauses sending and keeps the preview.
+   After **Wznów sesję**, the first fresh eligible frame starts the new sequence.
+4. Click **Zatrzymaj kamerę** to release the camera and enable the synthetic
+   test buttons again. Leaving the view or losing the session also releases it.
+
+If camera permission is denied, allow it in the browser and start again.
+For a model load error, check that the model file and WASM directory are served
+at the configured paths. After editing `.env.local`, restart Vite.
 
 Reconnection retains the session ID in memory and resets the sample sequence
 on the new confirmed connection. Reloading the page loses that ID. Closure code
