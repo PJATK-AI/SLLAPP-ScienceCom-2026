@@ -3,7 +3,7 @@
 <div align="center">
   <h1>SLLAPP · ScienceCom 2026</h1>
   <p>Sign Language Learning Application</p>
-  <p>WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand-tracking packages.</p>
+  <p>A Java game engine, WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand tracking.</p>
   <p>
     <img src="https://img.shields.io/badge/Java-21-ED8B00?style=flat-square" alt="Java 21">
     <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square" alt="Vue 3">
@@ -34,8 +34,9 @@
 SLLAPP is the Sign Language Learning Application project for ScienceCom 2026,
 maintained by PJATK AI.
 
-The backend creates player sessions over WebSocket, validates hand samples,
-stores game results and serves an ordered ranking over REST. The
+The backend includes a standalone Java engine for the spelling game. It also
+creates player sessions over WebSocket, validates hand samples, stores game
+results and serves an ordered ranking over REST. The
 frontend workspace contains a Vue WebSocket session test panel, a MediaPipe hand
 tracker and its Vue wrapper. The panel creates and resumes sessions and sends
 synthetic hand samples for transport testing.
@@ -97,6 +98,17 @@ pnpm dev
 Open the local URL printed by Vite.
 
 ## Usage
+
+### Use the game engine
+
+Java callers create a `GameEngine` with rules, a word picker, a start time and
+a deadline. The bundled catalog contains Polish words of lengths 3–7. The
+engine returns the current letter, position ID, remaining time and score,
+and advances when the caller completes the current position before the
+deadline. `GameRules.defaults()` sets the maximum word length to 7, letter
+points to 10, the word bonus to 20 and the multiplier step to 1. To configure
+these values per game, pass a custom `GameRules` instance. See the
+[Java usage example and scoring rules](docs/backend-architecture.md#standalone-game-engine).
 
 ### Frontend WebSocket test panel
 
@@ -225,7 +237,7 @@ saved results.
 
 | Path | Contents |
 | --- | --- |
-| `backend/` | Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
+| `backend/` | Java game engine, Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
 | `frontend/apps/web/` | Vue session test panel, WebSocket client and ranking API client |
 | `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
 | `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
@@ -242,10 +254,13 @@ From `backend/`:
 .\mvnw.cmd -B verify
 ```
 
-On Linux or macOS, use `sh mvnw -B verify`. The tests cover WebSocket creation,
-reconnects, expiry, concurrent ownership, sample validation and message limits,
-as well as SQLite persistence and ranking HTTP responses. Integration tests use
-random server ports and temporary databases.
+On Linux or macOS, use `sh mvnw -B verify`. The tests cover the game catalog,
+scoring and progression, WebSocket sessions and sample validation, SQLite
+persistence and ranking HTTP responses. Integration tests use random server
+ports and temporary databases.
+
+To run only the standalone game tests from `backend/`, use
+`sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
 
 ### Frontend commands
 
@@ -273,7 +288,7 @@ formatting, build, type checks and tests on pull requests and pushes to `master`
 | Document | Contents |
 | --- | --- |
 | [API reference](docs/api.md) | WebSocket messages, ranking requests, configuration and errors |
-| [Backend architecture](docs/backend-architecture.md) | Packages, session lifecycle, result storage and tests |
+| [Backend architecture](docs/backend-architecture.md) | Game engine, packages, session lifecycle, result storage and tests |
 | [Project workflow](docs/WORKFLOW.md) | Issues, branches, commits, validation and pull requests |
 
 Follow the project workflow when contributing. Changes reach `master` through
