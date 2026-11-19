@@ -23,7 +23,7 @@ import pl.pjatk.ai.sllapp.game.WordCatalog;
 
 var catalog = WordCatalog.loadBundled();
 var now = Instant.now();
-var game = new GameEngine(GameRules.defaults(), new RandomWordPicker(catalog), now, now.plusSeconds(30));
+var game = new GameEngine(GameRules.defaults(), new RandomWordPicker(catalog), now, now.plusSeconds(60));
 var current = game.state(now);
 char expectedLetter = current.expectedLetter();
 
