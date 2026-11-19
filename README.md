@@ -110,6 +110,29 @@ points to 10, the word bonus to 20 and the multiplier step to 1. To configure
 these values per game, pass a custom `GameRules` instance. See the
 [Java usage example and scoring rules](docs/backend-architecture.md#standalone-game-engine).
 
+### Open the game engine tester
+
+From `backend/` on Linux or macOS, start Spring Boot with the `game-test` profile.
+
+```sh
+sh mvnw spring-boot:test-run -Dspring-boot.run.profiles=game-test
+```
+
+On Windows PowerShell, use:
+
+```powershell
+.\mvnw.cmd spring-boot:test-run "-Dspring-boot.run.profiles=game-test"
+```
+
+Open the [game preview](http://127.0.0.1:8081/game-test) and select **Start
+game** for a 60-second round with random words. Click **Complete letter**
+to simulate a recognized sign. Watch the active letter, score, last award
+and countdown update from the engine. **New game** starts a fresh round.
+
+The tester uses the backend's engine, default rules and bundled catalog. The
+profile loads the panel from the test classpath and uses a database under
+`backend/target/game-test-data/`.
+
 ### Frontend WebSocket test panel
 
 Set `VITE_WS_URL=ws://127.0.0.1:8080/ws` in `frontend/apps/web/.env.local`
