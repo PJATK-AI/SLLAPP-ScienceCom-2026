@@ -1,10 +1,86 @@
 # Backend architecture
 
-The SLLAPP backend uses Java 21 and Spring Boot. It manages player sessions over
-WebSocket and validates hand samples. Game results are stored in SQLite and
-exposed through a ranking REST API.
+The SLLAPP backend uses Java 21 and Spring Boot. It provides a standalone
+spelling game engine, manages player sessions over WebSocket and validates
+hand samples. Game results are stored in SQLite and exposed through a ranking
+REST API.
 
 See the [README](../README.md) for local setup and commands.
+
+## Standalone game engine
+
+The `pl.pjatk.ai.sllapp.game` package uses the JDK. A Java caller creates one
+`GameEngine` and one `WordPicker` per game. The caller provides timestamps and
+serializes operations on the engine. The current WebSocket session flow
+exposes the `CREATED` state documented in the [API reference](api.md#websocket-transport).
+
+```java
+import java.time.Instant;
+import pl.pjatk.ai.sllapp.game.GameEngine;
+import pl.pjatk.ai.sllapp.game.GameRules;
+import pl.pjatk.ai.sllapp.game.RandomWordPicker;
+import pl.pjatk.ai.sllapp.game.WordCatalog;
+
+var catalog = WordCatalog.loadBundled();
+var now = Instant.now();
+var game = new GameEngine(GameRules.defaults(), new RandomWordPicker(catalog), now, now.plusSeconds(60));
+var current = game.state(now);
+char expectedLetter = current.expectedLetter();
+
+// Call this when the current letter has been recognized.
+boolean accepted = game.completePosition(current.positionId(), Instant.now());
+```
+
+The catalog can be shared across games. The bundled list is UTF-8, with one
+uppercase Polish word per line and several entries for each length from 3 to 7.
+See [`game/words.txt`](../backend/src/main/resources/game/words.txt).
+
+Catalog validation strips surrounding whitespace, skips empty lines
+and accepts the letters `A B C E I L M N O P R S T U W Y`. It reports invalid
+lengths, unsupported characters and duplicate words with line numbers.
+`WordCatalog.validate(lines, maxWordLength)` returns the issues.
+`WordCatalog.fromLines(lines, maxWordLength)` builds a custom catalog from
+valid input. The classpath loader reports resource read failures as
+`IOException`.
+
+`RandomWordPicker` checks for at least one word at every playable length
+before the engine starts. It draws from a separate pool for each length and
+refills a pool once it is empty. Callers can supply a seeded random generator
+or a deterministic `WordPicker` that provides valid words for every playable
+length. A maximum above 7 needs a custom word source with broader coverage.
+
+Each game starts at position ID 1, at the first letter of a 3-letter word.
+Completing the active position advances to the next letter and assigns a new
+ID within JavaScript's safe integer range. Completing a word draws a word
+one letter longer, up to the configured maximum. The immutable `GameState`
+exposes the position ID, word, zero-based letter index, expected letter,
+score, remaining milliseconds, finish status and `repeatsPreviousLetter`.
+That flag compares the current letter with the last completed letter,
+including across word boundaries.
+
+Completions with stale or unknown IDs return `false`. A state read or
+completion at or after the deadline finishes the game, preserves the final
+position and score, and sets the remaining time to zero. The completion
+returns `false`. Remaining time is reported in whole milliseconds, while
+expiry uses the instant itself.
+
+The immutable `GameRules` takes a maximum word length of at least 3 and
+nonnegative `BigDecimal` scoring values.
+
+| Setting | Default |
+| --- | ---: |
+| `maxWordLength` | 7 |
+| `letterPoints` | 10 |
+| `wordBonus` | 20 |
+| `multiplierStep` | 1 |
+
+For a word of length `L`, the multiplier is `1 + (L - 3) × multiplierStep`.
+Each accepted position adds the scaled letter award. The last position
+also adds the scaled word bonus for the same word. The engine rounds
+each award separately to the nearest integer with halves rounded up.
+With the default rules, completing a 4-letter word adds 120 points.
+Score overflow raises an arithmetic error before the engine changes the
+position or draws the next word.
 
 ## WebSocket transport
 
@@ -75,8 +151,9 @@ See the [API reference](api.md).
 
 ## Code structure
 
-`web` owns the REST and WebSocket protocols. `service` manages game sessions and
-ranks results. Each class in `service` uses `@Service` and has a name ending in
+`game` owns the standalone game rules and state. `web` owns the REST and
+WebSocket protocols. `service` manages game sessions and ranks results. Each
+class in `service` uses `@Service` and has a name ending in
 `Service`. `moderation` contains the nickname rules and the blocked-word list.
 `model` contains the application data types, and `repository` implements the SQL
 queries. WebSocket message records live in `web.websocket.message`, REST DTOs in
@@ -115,6 +192,13 @@ backend/src/
 │   │   │       ├── SessionWebSocketProperties.java
 │   │   │       ├── WebConfiguration.java
 │   │   │       └── WebProperties.java
+│   │   ├── game/
+│   │   │   ├── GameEngine.java
+│   │   │   ├── GameRules.java
+│   │   │   ├── GameState.java
+│   │   │   ├── RandomWordPicker.java
+│   │   │   ├── WordCatalog.java
+│   │   │   └── WordPicker.java
 │   │   ├── model/
 │   │   │   ├── GameResult.java
 │   │   │   ├── GameSession.java
@@ -145,6 +229,8 @@ backend/src/
 │   │           └── SessionWebSocketHandler.java
 │   └── resources/
 │       ├── application.yml
+│       ├── game/
+│       │   └── words.txt
 │       ├── moderation/
 │       │   ├── blocked-words.txt
 │       │   ├── LICENSE-LDNOOBW.txt
@@ -152,6 +238,11 @@ backend/src/
 │       └── schema.sql
 └── test/
     ├── java/pl/pjatk/ai/sllapp/
+    │   ├── game/
+    │   │   ├── GameEngineTest.java
+    │   │   ├── GameRulesTest.java
+    │   │   ├── RandomWordPickerTest.java
+    │   │   └── WordCatalogTest.java
     │   ├── moderation/
     │   │   ├── BlockedWordListTest.java
     │   │   └── NicknamePolicyTest.java
@@ -257,6 +348,11 @@ row limit as a bound SQL parameter. A limit below 1 causes
 `IllegalArgumentException`.
 
 ## Test coverage and CI
+
+The game tests use fixed instants and controlled word picks without a Spring
+context. They check the bundled catalog, word pool refill, scoring, position
+progression, expiry and repeated letters. Run them from `backend/` with
+`sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
 
 The WebSocket tests cover creation, nickname validation, resuming, concurrent
 ownership changes, delayed close callbacks, expiry with a controlled clock,
