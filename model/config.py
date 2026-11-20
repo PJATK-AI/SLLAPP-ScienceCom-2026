@@ -25,8 +25,23 @@ N_SAMPLES = N_LETTERS * SAMPLES_PER_LETTER               # 960
 #: wrist -> middle MCP distance is roughly 0.05-0.3). Smaller values mean a degenerate detection.
 MIN_HAND_SCALE = 1e-6
 
+#: Final model, fixed explicitly (see model/README.md, "Final model"): the variant, classifier and
+#: probability calibration that ``python -m model.training --train-final`` trains and delivers.
+FINAL_VARIANT = "V3"
+FINAL_CLASSIFIER = "logreg"
+#: CalibratedClassifierCV method. Temperature scaling: one parameter for all letters, keeps the argmax.
+CALIBRATION_METHOD = "temperature"
+#: Folds by people for the calibration (KFold over the training people).
+CALIBRATION_SPLITS = 3
+
+#: Confidence thresholds compared in the training report (held-out people).
+THRESHOLDS: Tuple[float, ...] = (0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
+#: The recommended threshold is the lowest one whose error rate among accepted held-out samples is at
+#: most this value.
+MAX_ACCEPTED_ERROR = 0.01
+
 #: Variant used when training a model for inference and when none is given on the CLI.
-DEFAULT_VARIANT = "V3"
+DEFAULT_VARIANT = FINAL_VARIANT
 
 #: Classifiers compared for every variant (keys of ``model.training.CLASSIFIERS``).
 DEFAULT_CLASSIFIERS: Tuple[str, ...] = ("logreg", "svm", "knn", "random_forest")

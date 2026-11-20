@@ -6,9 +6,13 @@ from unittest import mock
 
 try:
     import numpy as np
+    import sklearn
     from sklearn.model_selection import cross_validate
 
     from model import training
+    from model.calibration import recommend_threshold
+    from model.config import (CALIBRATION_METHOD, FINAL_CLASSIFIER, FINAL_VARIANT, MAX_ACCEPTED_ERROR,
+                              THRESHOLDS)
     from model.training import (VARIANTS, LandmarkPreprocessor, TrainedModel, VariantMismatchError,
                                 build_pipeline, evaluate, get_variant, load_model, make_folds,
                                 samples_to_arrays, train_model)
@@ -92,44 +96,61 @@ class FinalTrainingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.samples = synthetic_samples(subjects=range(1, 9))
-        cls.final = training.train_final(cls.samples, ["V0", "V2"], ["knn", "logreg"],
-                                       outer_splits=4, inner_splits=3)
+        cls.final = training.train_final(cls.samples, comparison_variants=["V0", "V3"],
+                                         comparison_classifiers=["knn", "logreg"], outer_splits=4)
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.model_path, cls.report_path = training.write_final_run(cls.final, cls.tmp.name)
+        cls.model_path, cls.checksum_path, cls.report_path = training.write_final_run(cls.final, cls.tmp.name)
 
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_final_choice_uses_the_selection_rule(self):
-        best = training.best_result(self.final.comparison)
-        self.assertEqual((self.final.model.variant.id, self.final.model.classifier),
-                         (best.variant, best.classifier))
-        self.assertEqual(best.accuracy_mean, max(r.accuracy_mean for r in self.final.comparison))
+    def test_final_variant_and_classifier_are_fixed(self):
+        m = self.final.model
+        self.assertEqual((m.variant.id, m.classifier, m.calibration),
+                         (FINAL_VARIANT, FINAL_CLASSIFIER, CALIBRATION_METHOD))
+        # the comparison is context only: the final model does not depend on its winner
+        with mock.patch.object(training, "best_result", side_effect=AssertionError("no selection")):
+            again = training.train_final(self.samples, comparison_variants=[], comparison_classifiers=[])
+        self.assertEqual((again.model.variant.id, again.model.classifier), (FINAL_VARIANT, FINAL_CLASSIFIER))
+        self.assertEqual(again.comparison, [])
 
-    def test_every_candidate_is_compared(self):
+    def test_comparison_covers_every_candidate(self):
         self.assertEqual({(r.variant, r.classifier) for r in self.final.comparison},
-                         {(v, c) for v in ("V0", "V2") for c in ("knn", "logreg")})
-        self.assertEqual(len(self.final.nested), 4)
+                         {(v, c) for v in ("V0", "V3") for c in ("knn", "logreg")})
+        self.assertEqual(len(self.final.held_out.folds), 4)
 
     def test_final_model_is_trained_on_all_samples(self):
         X, y, _ = samples_to_arrays(self.samples)
         self.assertEqual(self.final.n_samples, len(y))
         self.assertEqual(self.final.n_people, 8)
         self.assertEqual(self.final.model.classes, sorted(set(y)))
-        clf = self.final.model.pipeline.named_steps["classifier"]
-        n_seen = getattr(clf, "n_samples_fit_", None)
-        if n_seen is not None:
-            self.assertEqual(n_seen, len(y))
+        base = training.base_pipeline(self.final.model.pipeline)
+        expected = LandmarkPreprocessor("wrist_middle_mcp").transform(X).mean(axis=0)
+        np.testing.assert_allclose(base.named_steps["standardize"].mean_, expected)
 
-    def test_saved_model_and_report(self):
-        loaded = load_model(self.model_path, expected_variant=self.final.model.variant.id)
+    def test_recommended_threshold_follows_the_rule(self):
+        rows = self.final.thresholds
+        t = self.final.model.recommended_threshold
+        self.assertEqual(t, recommend_threshold(rows, MAX_ACCEPTED_ERROR))
+        self.assertEqual([r.threshold for r in rows], list(THRESHOLDS))
+
+    def test_saved_files_and_report(self):
+        loaded = load_model(self.model_path, expected_variant=FINAL_VARIANT)
         X, _, _ = samples_to_arrays(self.samples)
-        np.testing.assert_array_equal(loaded.pipeline.predict(X), self.final.model.pipeline.predict(X))
+        np.testing.assert_allclose(loaded.pipeline.predict_proba(X), self.final.model.pipeline.predict_proba(X))
+        self.assertEqual(loaded.recommended_threshold, self.final.model.recommended_threshold)
+        checksum = training.file_sha256(self.model_path)
+        self.assertEqual(self.checksum_path.read_text(encoding="utf-8"), "%s  model.joblib\n" % checksum)
         report = self.report_path.read_text(encoding="utf-8")
-        self.assertIn("Variant: %s" % self.final.model.variant.id, report)
-        self.assertIn("Expected accuracy on new people (nested CV)", report)
-        self.assertIn("## Comparison on all people", report)
+        for text in ("Variant: %s" % FINAL_VARIANT, "Classifier: %s" % FINAL_CLASSIFIER,
+                     "method=%r" % CALIBRATION_METHOD, "## Confidence thresholds", "errors among accepted",
+                     "## Poses that are not letters", "letter_blend", "finger_mix", checksum,
+                     "scikit-learn %s" % sklearn.__version__):
+            self.assertIn(text, report)
+        t = self.final.model.recommended_threshold
+        if t is not None:
+            self.assertIn("reach the recommended threshold %.2f" % t, report)
 
 
 @unittest.skipUnless(HAVE_SKLEARN, "numpy/scikit-learn not installed")

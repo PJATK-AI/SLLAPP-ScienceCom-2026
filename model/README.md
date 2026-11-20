@@ -40,8 +40,16 @@ or point to another folder, in order of priority:
 > - Source / authors: _TODO - to be filled in by the project team_
 > - License: _TODO - to be filled in by the project team_
 > - Redistribution allowed: _TODO - unknown; do not commit or publish the data until confirmed_
+>
+> **Who confirms:** the owner of the AI area (`model/`), listed in the pinned issue *Project ownership*,
+> confirms the source and the license with the dataset authors and fills in the lines above.
+>
+> **Until then, the model file must not be published.** The model is trained on SPAS, so it is a file
+> derived from the dataset. Share it only inside the team, as described in
+> [Delivered model file](#delivered-model-file). Do not attach it to a GitHub release, commit it or
+> upload it to a public place.
 
-The repository's MIT license (`LICENSE`) covers the project code only, not the dataset.
+The repository's MIT license (`LICENSE`) covers the project code only, not the dataset or the model file.
 
 ## Landmark order
 
@@ -138,7 +146,7 @@ is fitted on training data only, refitted inside each cross-validation fold, and
 | `V0` | none | no |
 | `V1` | none | yes |
 | `V2` | `wrist_middle_mcp` | no |
-| `V3` (default, `DEFAULT_VARIANT`) | `wrist_middle_mcp` | yes |
+| `V3` (final model, `FINAL_VARIANT`) | `wrist_middle_mcp` | yes |
 | `V4` | `palm` | yes |
 | `V5` | `max_extent` | yes |
 
@@ -172,6 +180,37 @@ python -m model.training --nested
 The output lists the choice and test score of each outer fold and the mean +/- std over the 4 folds.
 That mean estimates the whole procedure "compare the variants and keep the best", not one fixed variant.
 
+### Final model
+
+The final model is fixed explicitly in `model/config.py`. It is not chosen again at each training:
+
+| setting | value |
+|---|---|
+| `FINAL_VARIANT` | `V3` (scale wrist->middle MCP + `StandardScaler`) |
+| `FINAL_CLASSIFIER` | `logreg` (`LogisticRegression`) |
+| `CALIBRATION_METHOD` | `temperature` (`CalibratedClassifierCV`, `ensemble=False`) |
+| `CALIBRATION_SPLITS` | `3` folds by people |
+
+The pipeline is `CalibratedClassifierCV(Pipeline(preprocess -> standardize -> classifier))`. The
+calibration folds are `KFold` over people (the same `make_folds` as the comparison). The calibrator
+is fitted on the predictions for the people held out of each fold. Then the pipeline is fitted on all
+samples. `predict_proba` gives a probability for each of the 16 letters, and the probabilities sum
+to 1. `SVC(probability=True)` is not used.
+
+Why `V3` + `logreg` and not the most accurate SVM. On held-out people, after the same temperature
+calibration (4 folds by people, calibration folds made from the training people only):
+
+| candidate | accuracy | log loss | errors among accepted at 0.80 | letter samples accepted at 0.80 | letter blends reaching 0.80 |
+|---|---|---|---|---|---|
+| `V3` + `logreg` | 0.965 | 0.106 | 0.6% | 94.5% | 45% |
+| `V2` + `svm` | 0.982 | 0.114 | 1.6% | 99.8% | 95% |
+| `V3` + `svm` | 0.977 | 0.117 | 1.5% | 99.1% | 93% |
+
+The calibrated SVMs give a confidence of about 0.9 or more to nearly every sample, including the
+wrong ones and the letter blends, so no threshold removes their errors. With `logreg`, a threshold
+removes most errors, so the backend can trust its confidence. The sigmoid method gave a much higher
+calibration error (0.17-0.22 against 0.02-0.05) and was rejected.
+
 ### Train the final model
 
 ```
@@ -179,20 +218,35 @@ python -m model.training --train-final            # writes to model/artifacts/
 python -m model.training --train-final path/to/dir
 ```
 
-This runs the whole procedure on the 6 variants x 4 classifiers:
+This command:
 
-1. nested cross-validation gives the expected accuracy on new people;
-2. the comparison on all 12 people (4 folds by people) chooses the variant and classifier with the
-   same rule as the inner loop (highest mean validation accuracy);
-3. the chosen pipeline is trained on all 960 samples.
+1. compares the 6 variants x 4 classifiers without calibration (4 folds by people), as context only;
+2. evaluates the fixed calibrated pipeline on held-out people: each of the 4 folds by people trains
+   and calibrates it on 9 people and scores the other 3 people;
+3. computes, for each threshold in `THRESHOLDS`, the share of accepted held-out samples and the error
+   rate among the accepted samples, and recommends the lowest threshold with at most
+   `MAX_ACCEPTED_ERROR` (1%) errors;
+4. scores poses that are not letters. They are built from the samples of the held-out people:
+   blends of two different letters, hands with each finger from a different letter, upside-down
+   hands and hands with random noise. The report states how many of them reach the recommended threshold;
+5. trains the calibrated pipeline on all 960 samples.
 
-It writes `model.joblib` (load it with `load_model`) and `report.md` (the choice, the nested CV
-estimate and both tables). `model/artifacts/` is in `.gitignore`: do not commit model files.
+It writes `model.joblib`, `model.joblib.sha256` and `report.md` (the fixed choice, the scikit-learn
+version, the checksum and all tables). `model/artifacts/` is in `.gitignore`: do not commit model files.
 
-Train one variant on all samples and save it for inference (do not commit model files):
+Result of the delivered model (from `report.md`): accuracy 0.965 on held-out people, expected
+calibration error 0.020. **Recommended threshold for the backend: 0.80.** At 0.80, 94.5% of the letter
+samples are accepted, with 0.6% errors (5 of 907). Of the 4080 generated non-letter poses, 2822
+(69.2%) reach 0.80: letter blends 44.7%, mixed fingers 65.0%, upside-down hands 98.5%, noise 79.6%.
+A threshold alone does not reject poses that are not letters, because the preprocessing does not
+normalize rotation. The backend should also require the same letter in several consecutive samples
+(issue #43). The non-letter poses are synthetic. They do not replace a test with real people at the booth.
+
+Train one variant on all samples and save it for inference (no evaluation; do not commit model files):
 
 ```
-python -m model.training --save out/model.joblib --variant V3 --classifier svm
+python -m model.training --save out/model.joblib --variant V3 --classifier logreg   # calibrated (temperature)
+python -m model.training --save out/model.joblib --calibration none                 # uncalibrated
 ```
 
 ```python
@@ -202,21 +256,67 @@ model = load_model("out/model.joblib", expected_variant="V3")
 letter = model.predict_hand(message["hand"])   # same preprocessing and fitted scaler as training
 ```
 
-The file stores the variant. `load_model` raises `VariantMismatchError` if it differs from
-`expected_variant` or from the current definition of that variant. Model files are pickles
-(joblib): load only files that you created.
+The model file (format 2) stores the variant, the classifier, the calibration method, the recommended
+threshold, the letters, and the scikit-learn and numpy versions. The pipeline is stored as pickled
+bytes. `load_model` reads the stored versions first. It raises `ModelVersionError` before it unpickles
+the pipeline if the installed scikit-learn differs:
+
+```
+model model/artifacts/model.joblib was trained with scikit-learn 1.9.1, but scikit-learn 1.8.0 is
+installed; install the pinned versions with: pip install -r model/requirements.txt
+```
+
+It raises `VariantMismatchError` if the variant differs from `expected_variant` or from the current
+definition of that variant. Format 1 files (before the calibration) are rejected. The training and
+service dependencies are pinned to exact versions in `model/requirements.txt`. A test checks that
+the installed scikit-learn is the pinned one. Model files are pickles (joblib): load only files that
+you created or got from the team.
+
+### Delivered model file
+
+The model file is **not in git** and **not on GitHub**. It is shared only inside the team, until the
+dataset license is confirmed (see [Provenance and license](#provenance-and-license)).
+
+| item | value |
+|---|---|
+| file | `model.joblib` (35 KB) |
+| model | `V3` + `logreg`, temperature calibration, recommended threshold 0.80 |
+| trained with | `python -m model.training --train-final`, scikit-learn 1.9.1, numpy 2.3.3, Python 3.13 |
+| SHA-256 | `7f95cc51f27d28340a3ecfa36ff8c1e69940a1de83d5ec0e8cf73690c69c29af` |
+
+Where to get it: ask the owner of the AI area (pinned issue *Project ownership*). The owner puts the
+file, with `model.joblib.sha256` and `report.md`, in the files of the team's Teams channel. Copy the
+file to `model/artifacts/model.joblib`, or give its path to the service with `--model`. You can also
+build it yourself from the dataset with `python -m model.training --train-final`. With the pinned
+versions, a second training on the same computer made a byte-for-byte identical file. On a different
+computer the checksum can differ. In that case use the delivered file.
+
+Check the checksum before you use the file. The result must be the SHA-256 above:
+
+```powershell
+(Get-FileHash model\artifacts\model.joblib -Algorithm SHA256).Hash.ToLower()
+```
+
+```sh
+sha256sum model/artifacts/model.joblib            # Linux
+shasum -a 256 model/artifacts/model.joblib        # macOS
+```
+
+When the service is running, `GET /health` also returns the checksum of the loaded file
+(`"checksum": "sha256:..."`).
 
 ### Prediction service
 
 `model/service.py` is a small HTTP service that returns the predicted letter and its confidence
 for one hand sample. The Java backend calls it for each sample and decides which predictions
-count: the service only predicts and applies no threshold. It uses only the Python standard
+count: the service only predicts and applies no threshold (the recommended threshold, 0.80, is
+in [Train the final model](#train-the-final-model) and in `report.md`). It uses only the Python standard
 library and the packages in `model/requirements.txt` (exact versions; a model file must be loaded
 with the scikit-learn version that trained it).
 
 ```
 pip install -r model/requirements.txt
-python -m model.training --train-final              # or use the delivered model file
+python -m model.training --train-final              # or use the delivered model file (see above)
 python -m model.service                             # model/artifacts/model.joblib on 127.0.0.1:8000
 python -m model.service --model path/to/model.joblib --variant V3 --port 8001
 ```
@@ -231,9 +331,10 @@ Settings (a command-line argument wins over the environment variable):
 | `--port` | `SLLAPP_PREDICT_PORT` | `8000` |
 
 The service loads the model once at startup. It prints an error and exits with code `1`, without
-opening the port, if the file is missing or is not a model file, the variant in the file differs
-from `--variant`, the classifier cannot give probabilities (for example `svm`, which is an `SVC`
-without `probability=True`) or the model letters are not `A B C E I L M N O P R S T U W Y`.
+opening the port, if the file is missing or is not a model file of format 2, the file was trained
+with a different scikit-learn version, the variant in the file differs from `--variant`, the
+classifier cannot give probabilities (for example an uncalibrated `svm`, saved with
+`--calibration none`) or the model letters are not `A B C E I L M N O P R S T U W Y`.
 
 #### `POST /predict`
 
@@ -259,8 +360,8 @@ The body is the `hand` object of a `hand_sample` message (see `docs/api.md`) wit
 | `422` | sample fails validation | `{"error": "<validation message>"}` |
 | `500` | unexpected prediction error | `{"error": "prediction failed"}` |
 
-`letter` is the most probable of the 16 letters and `confidence` (0-1) is its probability from
-`predict_proba` of the loaded model. Example 422 messages:
+`letter` is the most probable of the 16 letters and `confidence` (0-1) is its calibrated probability
+from `predict_proba` of the loaded model. Example 422 messages:
 `hand.coordinateSpace must be MEDIAPIPE_IMAGE, got 'WORLD'`, `expected exactly 21 landmarks, got 20`,
 `landmark 4: y must be finite, got inf`.
 
