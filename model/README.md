@@ -206,6 +206,75 @@ The file stores the variant. `load_model` raises `VariantMismatchError` if it di
 `expected_variant` or from the current definition of that variant. Model files are pickles
 (joblib): load only files that you created.
 
+### Prediction service
+
+`model/service.py` is a small HTTP service that returns the predicted letter and its confidence
+for one hand sample. The Java backend calls it for each sample and decides which predictions
+count: the service only predicts and applies no threshold. It uses only the Python standard
+library and the packages in `model/requirements.txt` (exact versions; a model file must be loaded
+with the scikit-learn version that trained it).
+
+```
+pip install -r model/requirements.txt
+python -m model.training --train-final              # or use the delivered model file
+python -m model.service                             # model/artifacts/model.joblib on 127.0.0.1:8000
+python -m model.service --model path/to/model.joblib --variant V3 --port 8001
+```
+
+Settings (a command-line argument wins over the environment variable):
+
+| argument | environment variable | default |
+|---|---|---|
+| `--model` | `SLLAPP_MODEL_PATH` | `model/artifacts/model.joblib` |
+| `--variant` | `SLLAPP_MODEL_VARIANT` | `V3` (`DEFAULT_VARIANT`) |
+| `--host` | `SLLAPP_PREDICT_HOST` | `127.0.0.1` |
+| `--port` | `SLLAPP_PREDICT_PORT` | `8000` |
+
+The service loads the model once at startup. It prints an error and exits with code `1`, without
+opening the port, if the file is missing or is not a model file, the variant in the file differs
+from `--variant`, the classifier cannot give probabilities (for example `svm`, which is an `SVC`
+without `probability=True`) or the model letters are not `A B C E I L M N O P R S T U W Y`.
+
+#### `POST /predict`
+
+The body is the `hand` object of a `hand_sample` message (see `docs/api.md`) with
+`coordinateSpace`:
+
+```json
+{"coordinateSpace": "MEDIAPIPE_IMAGE", "handedness": "RIGHT",
+ "landmarks": [{"x": 0.50, "y": 0.70, "z": 0.00}, "... 21 points in MediaPipe order"]}
+```
+
+- `coordinateSpace` must be `MEDIAPIPE_IMAGE` and `handedness` must be `LEFT` or `RIGHT`.
+- `landmarks` holds exactly 21 objects with finite numeric `x`, `y`, `z`. Extra fields (for
+  example `score`) are ignored.
+- The service does **not** mirror left-hand samples: the frontend applies `x = 1 - x` to the
+  left hand before sending (`normalizeHandForModel`, issue #29). `handedness` is only validated.
+
+| status | when | body |
+|---|---|---|
+| `200` | valid sample | `{"letter": "A", "confidence": 0.93}` |
+| `400` | body is not valid JSON (also `NaN`/`Infinity` literals, bad UTF-8, empty body) | `{"error": "<message>"}` |
+| `413` | body larger than 64 KB | `{"error": "<message>"}` |
+| `422` | sample fails validation | `{"error": "<validation message>"}` |
+| `500` | unexpected prediction error | `{"error": "prediction failed"}` |
+
+`letter` is the most probable of the 16 letters and `confidence` (0-1) is its probability from
+`predict_proba` of the loaded model. Example 422 messages:
+`hand.coordinateSpace must be MEDIAPIPE_IMAGE, got 'WORLD'`, `expected exactly 21 landmarks, got 20`,
+`landmark 4: y must be finite, got inf`.
+
+#### `GET /health`
+
+```json
+{"status": "ok", "variant": "V3", "classifier": "logreg",
+ "letters": ["A", "B", "C", "E", "I", "L", "M", "N", "O", "P", "R", "S", "T", "U", "W", "Y"],
+ "checksum": "sha256:<hex digest of the model file>"}
+```
+
+Only failed requests are logged. The model file is a pickle: start the service only with model
+files that you created or got from the team.
+
 ### Run the validation
 
 ```

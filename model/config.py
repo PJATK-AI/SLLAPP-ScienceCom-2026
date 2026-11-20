@@ -15,6 +15,8 @@ N_LETTERS = 16
 N_SUBJECTS = 12
 N_REPETITIONS = 5
 N_LANDMARKS = 21
+#: Letter classes of the SPAS dataset and of a delivered model, in sorted order.
+LETTERS: Tuple[str, ...] = tuple("ABCEILMNOPRSTUWY")
 SAMPLES_PER_LETTER = N_SUBJECTS * N_REPETITIONS          # 60
 N_SAMPLES = N_LETTERS * SAMPLES_PER_LETTER               # 960
 
@@ -38,6 +40,20 @@ RANDOM_SEED = 42
 
 #: Where ``python -m model.training --train-final`` writes model.joblib and report.md (git-ignored).
 DEFAULT_ARTIFACTS_DIR = MODEL_DIR / "artifacts"
+
+# --- prediction service (python -m model.service) ----------------------------
+#: Model file loaded by the service when neither --model nor SLLAPP_MODEL_PATH is given.
+DEFAULT_MODEL_PATH = DEFAULT_ARTIFACTS_DIR / "model.joblib"
+MODEL_PATH_ENV_VAR = "SLLAPP_MODEL_PATH"
+#: Variant the service expects the model file to have.
+MODEL_VARIANT_ENV_VAR = "SLLAPP_MODEL_VARIANT"
+DEFAULT_SERVICE_HOST = "127.0.0.1"
+SERVICE_HOST_ENV_VAR = "SLLAPP_PREDICT_HOST"
+DEFAULT_SERVICE_PORT = 8000
+SERVICE_PORT_ENV_VAR = "SLLAPP_PREDICT_PORT"
+#: Only coordinate space the model accepts (MediaPipe image landmarks, same as SPAS).
+COORDINATE_SPACE = "MEDIAPIPE_IMAGE"
+HANDEDNESS_VALUES: Tuple[str, ...] = ("LEFT", "RIGHT")
 
 # Landmark order, identical to MediaPipe Hands (index = position in the file's lists).
 LANDMARK_NAMES: Tuple[str, ...] = (

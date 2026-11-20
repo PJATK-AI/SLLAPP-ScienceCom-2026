@@ -1,3 +1,7 @@
-numpy>=1.26
-scikit-learn>=1.5
-joblib>=1.3
+# Exact versions for training and the prediction service (including the scikit-learn dependencies).
+# A model file must be loaded with the scikit-learn version that trained it.
+numpy==2.3.3
+scipy==1.18.1
+scikit-learn==1.9.1
+joblib==1.5.2
+threadpoolctl==3.7.0
