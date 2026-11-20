@@ -19,8 +19,10 @@ import org.springframework.web.socket.WebSocketSession;
 import pl.pjatk.ai.sllapp.config.moderation.ModerationProperties;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
+import pl.pjatk.ai.sllapp.model.GameResult;
 import pl.pjatk.ai.sllapp.moderation.BlockedWordList;
 import pl.pjatk.ai.sllapp.moderation.NicknamePolicy;
+import pl.pjatk.ai.sllapp.repository.GameResultRepository;
 import pl.pjatk.ai.sllapp.service.SessionService;
 import pl.pjatk.ai.sllapp.support.MutableClock;
 import tools.jackson.databind.JsonNode;
@@ -30,19 +32,24 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
 class SessionOwnershipTest {
+    private static final TextMessage START = new TextMessage("{\"type\":\"start_game\"}");
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SessionService sessions = new SessionService(new MutableClock(),
-            new SessionProperties(Duration.ofMinutes(5)),
+    private final MutableClock clock = new MutableClock();
+    private final GameResultRepository results = mock(GameResultRepository.class);
+    private final SessionService sessions = new SessionService(clock,
+            new SessionProperties(Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofMinutes(5)),
             new NicknamePolicy(new BlockedWordList(
                     new ModerationProperties("classpath:moderation/test-blocked-words.txt"),
-                    new DefaultResourceLoader())));
+                    new DefaultResourceLoader())), () -> length -> "A".repeat(length), results);
+    private final SessionConnectionRegistry connections = new SessionConnectionRegistry(sessions, mapper, clock);
     private final SessionWebSocketHandler handler = new SessionWebSocketHandler(mapper,
             new SessionWebSocketProperties(65536, 262144, true), sessions, new SampleMessageValidator(),
-            new SessionConnectionRegistry(sessions, mapper));
+            connections, clock);
 
     @Test
     void ignoresOldMessagesAndLateCloseCallbacksAfterReplacement() throws Exception {
@@ -92,6 +99,45 @@ class SessionOwnershipTest {
         long acknowledgements = candidates.stream().flatMap(socket -> socket.messages.stream())
                 .filter(message -> message.path("type").asString().equals("sample_ack")).count();
         assertThat(acknowledgements).isEqualTo(1);
+    }
+
+    @Test
+    void startsAtMostOnceWhenTwoMessagesRace() throws Exception {
+        var current = socket();
+        create(current);
+        var gate = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var tasks = IntStream.range(0, 2).mapToObj(index -> workers.submit(() -> {
+                if (!gate.await(5, TimeUnit.SECONDS)) throw new AssertionError("start timeout");
+                handler.handleMessage(current.socket, START);
+                return null;
+            })).toList();
+            gate.countDown();
+            for (var task : tasks) task.get(5, TimeUnit.SECONDS);
+        }
+        assertThat(current.messages).hasSize(3);
+        assertThat(current.messages.get(1).path("status").asString()).isEqualTo("RUNNING");
+        assertThat(current.messages.get(2).path("code").asString()).isEqualTo("GAME_ALREADY_STARTED");
+    }
+
+    @Test
+    void persistsTheFinalResultEvenWhenTheSocketSendFails() throws Exception {
+        var first = socket();
+        var id = create(first);
+        handler.handleMessage(first.socket, START);
+        var game = sessions.find(UUID.fromString(id)).orElseThrow();
+        assertThat(connections.completePosition(game, 1)).isTrue();
+        doThrow(new IOException("simulated send failure")).when(first.socket).sendMessage(any());
+
+        clock.advance(Duration.ofMinutes(1));
+        connections.expireSessions();
+        connections.expireSessions();
+        verify(results).save(new GameResult(id, "Ola", 10, clock.instant()));
+
+        var replacement = socket();
+        resume(replacement, id);
+        assertThat(replacement.messages.getFirst().path("status").asString()).isEqualTo("FINISHED");
+        assertThat(replacement.messages.getFirst().path("score").intValue()).isEqualTo(10);
     }
 
     private String create(RecordedSocket socket) throws Exception {
