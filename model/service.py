@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -16,7 +15,7 @@ from .config import (COORDINATE_SPACE, DEFAULT_MODEL_PATH, DEFAULT_SERVICE_HOST,
                      DEFAULT_VARIANT, HANDEDNESS_VALUES, LETTERS, MODEL_PATH_ENV_VAR, MODEL_VARIANT_ENV_VAR,
                      N_LANDMARKS, SERVICE_HOST_ENV_VAR, SERVICE_PORT_ENV_VAR)
 from .preprocessing import LandmarkValidationError
-from .training import TrainedModel, landmarks_to_row, load_model
+from .training import TrainedModel, file_sha256, landmarks_to_row, load_model
 
 MAX_BODY_BYTES = 64 * 1024
 
@@ -69,21 +68,13 @@ def validate_hand(hand: Any):
     return landmarks
 
 
-def file_sha256(path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def load_service(model_path, expected_variant: str) -> PredictionService:
     path = Path(model_path)
     if not path.is_file():
         raise ModelLoadError("model file %s does not exist" % path)
     try:
         model = load_model(path, expected_variant=expected_variant)
-    except ValueError as exc:  # includes VariantMismatchError
+    except ValueError as exc:  # includes VariantMismatchError and ModelVersionError
         raise ModelLoadError(str(exc)) from exc
     except Exception as exc:
         raise ModelLoadError("cannot load model %s: %s" % (path, exc)) from exc

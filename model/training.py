@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import pickle
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -8,6 +10,7 @@ import joblib
 import numpy as np
 import sklearn
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
@@ -17,13 +20,18 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from .config import (CV_SPLITS, DEFAULT_ARTIFACTS_DIR, DEFAULT_CLASSIFIERS, DEFAULT_VARIANT, INNER_CV_SPLITS, N_LANDMARKS,
-                     RANDOM_SEED)
+from .calibration import (CALIBRATION_METHODS, NON_LETTER_KINDS, HeldOutResult, build_calibrated,
+                          held_out_evaluate, recommend_threshold)
+from .config import (CALIBRATION_METHOD, CALIBRATION_SPLITS, CV_SPLITS, DEFAULT_ARTIFACTS_DIR, DEFAULT_CLASSIFIERS,
+                     DEFAULT_VARIANT, FINAL_CLASSIFIER, FINAL_VARIANT, INNER_CV_SPLITS, MAX_ACCEPTED_ERROR,
+                     N_LANDMARKS, RANDOM_SEED, THRESHOLDS)
 from .preprocessing import (SCALE_METHODS, LandmarkValidationError, preprocess_landmarks,
                             validate_landmarks)
 
 N_FEATURES = N_LANDMARKS * 3
-MODEL_FORMAT = 1
+#: Format 2: plain metadata + the pickled pipeline as bytes, so that the scikit-learn version is
+#: checked before any scikit-learn object is unpickled.
+MODEL_FORMAT = 2
 
 
 @dataclass(frozen=True)
@@ -232,7 +240,22 @@ class VariantMismatchError(ValueError):
     pass
 
 
-def _check_pipeline_matches(pipeline: Pipeline, variant: Variant) -> None:
+class ModelVersionError(ValueError):
+    pass
+
+
+def base_pipeline(estimator):
+    # the uncalibrated Pipeline inside a CalibratedClassifierCV (fitted on all rows when fitted)
+    if isinstance(estimator, CalibratedClassifierCV):
+        fitted = getattr(estimator, "calibrated_classifiers_", None)
+        return fitted[0].estimator if fitted else estimator.estimator
+    return estimator
+
+
+def _check_pipeline_matches(pipeline, variant: Variant) -> None:
+    pipeline = base_pipeline(pipeline)
+    if not isinstance(pipeline, Pipeline):
+        raise VariantMismatchError("model is not a pipeline of variant %s" % variant.id)
     steps = dict(pipeline.steps)
     pre = steps.get("preprocess")
     if not isinstance(pre, LandmarkPreprocessor) or pre.scale_method != variant.scale_method:
@@ -242,11 +265,19 @@ def _check_pipeline_matches(pipeline: Pipeline, variant: Variant) -> None:
 
 
 class TrainedModel:
-    def __init__(self, pipeline: Pipeline, variant: Variant, classifier: str):
+    def __init__(self, pipeline, variant: Variant, classifier: str, calibration: Optional[str] = None,
+                 recommended_threshold: Optional[float] = None):
         _check_pipeline_matches(pipeline, variant)
+        if isinstance(pipeline, CalibratedClassifierCV):
+            if pipeline.method != calibration:
+                raise ValueError("model is calibrated with %r, not %r" % (pipeline.method, calibration))
+        elif calibration is not None:
+            raise ValueError("model is not calibrated, but calibration %r is given" % calibration)
         self.pipeline = pipeline
         self.variant = variant
         self.classifier = classifier
+        self.calibration = calibration
+        self.recommended_threshold = recommended_threshold
 
     @property
     def classes(self) -> List[str]:
@@ -260,26 +291,48 @@ class TrainedModel:
             raise LandmarkValidationError("hand must be an object with a 'landmarks' list")
         return self.predict_landmarks(hand["landmarks"])
 
+    def metadata(self) -> Dict[str, Any]:
+        return {"format": MODEL_FORMAT, "sklearn_version": sklearn.__version__,
+                "numpy_version": np.__version__, "variant": asdict(self.variant),
+                "classifier": self.classifier, "calibration": self.calibration,
+                "recommended_threshold": self.recommended_threshold, "letters": self.classes}
+
     def save(self, path) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({"format": MODEL_FORMAT, "variant": asdict(self.variant),
-                     "classifier": self.classifier, "sklearn_version": sklearn.__version__,
-                     "pipeline": self.pipeline}, path)
+        data = self.metadata()
+        data["pipeline"] = pickle.dumps(self.pipeline, protocol=pickle.HIGHEST_PROTOCOL)
+        joblib.dump(data, path)
         return path
 
 
 def train_model(samples: Iterable[Any], variant_id: str = DEFAULT_VARIANT,
-                classifier: str = "logreg", seed: int = RANDOM_SEED) -> TrainedModel:
+                classifier: str = FINAL_CLASSIFIER, seed: int = RANDOM_SEED,
+                calibration: Optional[str] = None, calibration_splits: int = CALIBRATION_SPLITS,
+                recommended_threshold: Optional[float] = None) -> TrainedModel:
     variant = get_variant(variant_id)
-    X, y, _ = samples_to_arrays(samples)
-    return TrainedModel(build_pipeline(variant, classifier, seed).fit(X, y), variant, classifier)
+    X, y, groups = samples_to_arrays(samples)
+    estimator = build_pipeline(variant, classifier, seed)
+    if calibration is not None:
+        estimator = build_calibrated(estimator, groups, calibration, calibration_splits, seed)
+    return TrainedModel(estimator.fit(X, y), variant, classifier, calibration, recommended_threshold)
 
 
-def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
+def read_model_metadata(path) -> Dict[str, Any]:
     data = joblib.load(path)
     if not isinstance(data, dict) or data.get("format") != MODEL_FORMAT:
         raise ValueError("%s is not a model file of format %d" % (path, MODEL_FORMAT))
+    return data
+
+
+def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
+    data = read_model_metadata(path)
+    trained_with = data.get("sklearn_version")
+    if trained_with != sklearn.__version__:
+        raise ModelVersionError(
+            "model %s was trained with scikit-learn %s, but scikit-learn %s is installed; install the "
+            "pinned versions with: pip install -r model/requirements.txt"
+            % (path, trained_with, sklearn.__version__))
     stored = Variant(**data["variant"])
     if expected_variant is not None and stored.id != expected_variant:
         raise VariantMismatchError("model %s was trained with variant %s, expected %s"
@@ -288,7 +341,19 @@ def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
     if known is not None and known != stored:
         raise VariantMismatchError("variant %s in %s differs from the current definition"
                                    % (stored.id, path))
-    return TrainedModel(data["pipeline"], stored, data["classifier"])
+    model = TrainedModel(pickle.loads(data["pipeline"]), stored, data["classifier"], data["calibration"],
+                         data["recommended_threshold"])
+    if model.classes != list(data["letters"]):
+        raise ValueError("letters of the pipeline in %s differ from the stored letters" % path)
+    return model
+
+
+def file_sha256(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # final training
@@ -297,71 +362,151 @@ def load_model(path, expected_variant: Optional[str] = None) -> TrainedModel:
 class FinalRun:
     model: "TrainedModel"
     comparison: List[CVResult]
-    nested: List[NestedFoldResult]
+    held_out: HeldOutResult
     n_samples: int
     n_people: int
     outer_splits: int
-    inner_splits: int
+    calibration_splits: int
     seed: int
+    max_error: float
+
+    @property
+    def thresholds(self):
+        return self.held_out.thresholds(THRESHOLDS)
 
 
-def train_final(samples: Iterable[Any], variants: Sequence[str] = tuple(VARIANTS),
-                classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
-                outer_splits: int = CV_SPLITS, inner_splits: int = INNER_CV_SPLITS,
-                seed: int = RANDOM_SEED, n_jobs: Optional[int] = None) -> FinalRun:
+def train_final(samples: Iterable[Any], variant_id: str = FINAL_VARIANT, classifier: str = FINAL_CLASSIFIER,
+                calibration: str = CALIBRATION_METHOD, comparison_variants: Sequence[str] = tuple(VARIANTS),
+                comparison_classifiers: Sequence[str] = DEFAULT_CLASSIFIERS,
+                outer_splits: int = CV_SPLITS, calibration_splits: int = CALIBRATION_SPLITS,
+                seed: int = RANDOM_SEED, max_error: float = MAX_ACCEPTED_ERROR,
+                n_jobs: Optional[int] = None) -> FinalRun:
+    samples = list(samples)
     X, y, groups = samples_to_arrays(samples)
-    nested = nested_evaluate(X, y, groups, variants, classifiers, outer_splits, inner_splits, seed)
-    comparison = evaluate(X, y, groups, variants, classifiers, outer_splits, seed, n_jobs)
-    best = best_result(comparison)
-    variant = get_variant(best.variant)
-    pipeline = build_pipeline(variant, best.classifier, seed).fit(X, y)
-    return FinalRun(TrainedModel(pipeline, variant, best.classifier), comparison, nested,
-                    len(y), len(np.unique(groups)), outer_splits, inner_splits, seed)
+    comparison = (evaluate(X, y, groups, comparison_variants, comparison_classifiers, outer_splits, seed, n_jobs)
+                  if comparison_variants and comparison_classifiers else [])
+    held_out = held_out_evaluate(X, y, groups, variant_id, classifier, calibration, outer_splits,
+                                 calibration_splits, seed)
+    threshold = recommend_threshold(held_out.thresholds(THRESHOLDS), max_error)
+    model = train_model(samples, variant_id, classifier, seed, calibration, calibration_splits, threshold)
+    return FinalRun(model, comparison, held_out, len(y), len(np.unique(groups)), outer_splits,
+                    calibration_splits, seed, max_error)
 
 
-def format_report(run: FinalRun) -> str:
-    m = run.model
-    acc = np.array([r.test_accuracy for r in run.nested])
-    f1 = np.array([r.test_f1_macro for r in run.nested])
-    chosen = next(r for r in run.comparison
-                  if (r.variant, r.classifier) == (m.variant.id, m.classifier))
-    return "\n".join([
+def _pct(value: Optional[float]) -> str:
+    return "-" if value is None else "%.1f%%" % (100 * value)
+
+
+def format_threshold_table(run: FinalRun) -> str:
+    kinds = list(NON_LETTER_KINDS)
+    lines = ["| threshold | accepted letter samples | errors among accepted | "
+             + " | ".join("%s reaching it" % k for k in kinds) + " |",
+             "|---|---|---|" + "---|" * len(kinds)]
+    for row in run.thresholds:
+        reached = run.held_out.non_letters_reaching(row.threshold)
+        mark = " (recommended)" if row.threshold == run.model.recommended_threshold else ""
+        lines.append("| %.2f%s | %s (%d/%d) | %s (%d) | %s |" % (
+            row.threshold, mark, _pct(row.accepted_share), row.accepted, row.total, _pct(row.error_rate),
+            row.errors, " | ".join(_pct(reached[k][0] / reached[k][1]) for k in kinds)))
+    return "\n".join(lines)
+
+
+def format_report(run: FinalRun, checksum: Optional[str] = None) -> str:
+    m, h = run.model, run.held_out
+    t = m.recommended_threshold
+    lines = [
         "# Model training report",
         "",
         "- Data: %d samples, %d people, %d letters" % (run.n_samples, run.n_people, len(m.classes)),
-        "- Candidates: %d variants x %d classifiers"
-        % (len({r.variant for r in run.comparison}), len({r.classifier for r in run.comparison})),
-        "- Folds: KFold over people, %d outer / %d inner splits, seed %d"
-        % (run.outer_splits, run.inner_splits, run.seed),
-        "- scikit-learn %s" % sklearn.__version__,
+        "- Folds: KFold over people, %d folds for the held-out results, %d calibration folds over the "
+        "training people, seed %d" % (run.outer_splits, run.calibration_splits, run.seed),
+        "- scikit-learn %s, numpy %s" % (sklearn.__version__, np.__version__),
         "",
         "## Final model",
         "",
-        "- Variant: %s (%s)" % (m.variant.id, m.variant.description),
-        "- Classifier: %s" % m.classifier,
-        "- Validation accuracy in the comparison: %.3f +/- %.3f (optimistic: used for the choice)"
-        % (chosen.accuracy_mean, chosen.accuracy_std),
-        "- Expected accuracy on new people (nested CV): %.3f +/- %.3f, macro-F1 %.3f +/- %.3f"
-        % (acc.mean(), acc.std(), f1.mean(), f1.std()),
-        "- Trained on all %d samples." % run.n_samples,
+        "- Variant: %s (%s), fixed in `model/config.py` (`FINAL_VARIANT`)" % (m.variant.id, m.variant.description),
+        "- Classifier: %s, fixed in `model/config.py` (`FINAL_CLASSIFIER`)" % m.classifier,
+        "- Calibration: `CalibratedClassifierCV(method=%r, ensemble=False)` on %d folds by people"
+        % (m.calibration, run.calibration_splits),
+        "- Trained on all %d samples. The calibrator is fitted on predictions for the people held out "
+        "of each calibration fold." % run.n_samples,
+        "- Recommended confidence threshold for the backend: %s"
+        % ("%.2f" % t if t is not None else "none (no threshold reaches the error target)"),
+    ]
+    if checksum:
+        lines.append("- Model file SHA-256: `%s`" % checksum)
+    lines += [
         "",
-        "## Nested cross-validation",
+        "## Held-out people",
         "",
-        format_nested_results(run.nested),
+        "Each of the %d folds trains and calibrates the final pipeline on the training people only and "
+        "scores the held-out people:" % run.outer_splits,
         "",
-        "## Comparison on all people",
+        "| fold | training people | held-out people |",
+        "|---|---|---|",
+    ]
+    lines += ["| %d | %s | %s |" % (i, ", ".join(map(str, tr)), ", ".join(map(str, te)))
+              for i, (tr, te) in enumerate(h.folds, start=1)]
+    lines += [
         "",
-        format_results(run.comparison),
+        "Accuracy %.3f, macro-F1 %.3f, log loss %.3f, expected calibration error %.3f (10 bins)."
+        % (h.accuracy, h.f1_macro, h.log_loss, h.calibration_error),
         "",
-    ])
+        "## Confidence thresholds",
+        "",
+        "A sample is accepted when the probability of its most probable letter is at least the threshold. "
+        "Letter columns: all %d samples, each scored by the fold that held its person out. Non-letter "
+        "columns: share of the poses below whose most probable letter reaches the threshold." % len(h.y),
+        "",
+        format_threshold_table(run),
+        "",
+        "Rule: the recommended threshold is the lowest one in the table with at most %s errors among "
+        "the accepted held-out letter samples." % _pct(run.max_error),
+        "",
+        "## Poses that are not letters",
+        "",
+        "Generated from the samples of the held-out people of each fold, so the model never saw these people.",
+    ]
+    if t is not None:
+        reached = h.non_letters_reaching(t)
+        lines += ["", "| kind | poses | reaching %.2f | description |" % t, "|---|---|---|---|"]
+        for kind, text in NON_LETTER_KINDS.items():
+            a, n = reached[kind]
+            lines.append("| %s | %d | %d (%s) | %s |" % (kind, n, a, _pct(a / n), text))
+        total_a = sum(a for a, _ in reached.values())
+        total_n = sum(n for _, n in reached.values())
+        lines += ["", "%d of %d non-letter poses (%s) reach the recommended threshold %.2f."
+                  % (total_a, total_n, _pct(total_a / total_n), t)]
+    lines += [
+        "",
+        "The threshold alone does not reject poses that are not letters. The preprocessing does not "
+        "normalize rotation, and the classifier can give a high confidence to poses far from the training "
+        "data (see `upside_down` and `noise`). The backend should also require the same letter in several "
+        "consecutive samples. These poses are synthetic: real non-letter poses at the booth are not measured.",
+    ]
+    if run.comparison:
+        lines += [
+            "",
+            "## Uncalibrated variants and classifiers (context for the fixed choice)",
+            "",
+            "4 folds by people; the best score here is optimistic. Use `python -m model.training --nested` "
+            "for the nested estimate.",
+            "",
+            format_results(run.comparison),
+        ]
+    lines.append("")
+    return "\n".join(lines)
 
 
-def write_final_run(run: FinalRun, out_dir) -> Tuple[Path, Path]:
+def write_final_run(run: FinalRun, out_dir) -> Tuple[Path, Path, Path]:
     out_dir = Path(out_dir)
     model_path = run.model.save(out_dir / "model.joblib")
+    checksum = file_sha256(model_path)
+    checksum_path = out_dir / "model.joblib.sha256"
+    checksum_path.write_text("%s  %s\n" % (checksum, model_path.name), encoding="utf-8")
     report_path = out_dir / "report.md"
-    report_path.write_text(format_report(run), encoding="utf-8")
-    return model_path, report_path
+    report_path.write_text(format_report(run, checksum), encoding="utf-8")
+    return model_path, checksum_path, report_path
 
 
 # CLI
@@ -381,29 +526,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--inner-splits", type=int, default=INNER_CV_SPLITS)
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--train-final", metavar="DIR", nargs="?", const=str(DEFAULT_ARTIFACTS_DIR),
-                        help="choose the best variant/classifier, estimate it with nested CV, train "
-                             "it on all samples and write model.joblib + report.md to DIR "
-                             "(default: %(const)s)")
+                        help="train the fixed final model (%s, %s, %s calibration) on all samples, "
+                             "evaluate it on held-out people and write model.joblib, model.joblib.sha256 "
+                             "and report.md to DIR (default: %%(const)s)"
+                             % (FINAL_VARIANT, FINAL_CLASSIFIER, CALIBRATION_METHOD))
     parser.add_argument("--save", metavar="PATH",
-                        help="train VARIANT/CLASSIFIER on all samples and save to PATH (no CV)")
+                        help="train VARIANT/CLASSIFIER on all samples and save to PATH (no evaluation)")
     parser.add_argument("--variant", default=DEFAULT_VARIANT, choices=list(VARIANTS))
-    parser.add_argument("--classifier", default="logreg", choices=list(CLASSIFIERS))
+    parser.add_argument("--classifier", default=FINAL_CLASSIFIER, choices=list(CLASSIFIERS))
+    parser.add_argument("--calibration", default=CALIBRATION_METHOD,
+                        choices=list(CALIBRATION_METHODS) + ["none"],
+                        help="probability calibration for --save (default: %(default)s)")
     args = parser.parse_args(argv)
 
     from .dataset import load_dataset
     samples = load_dataset(args.dataset)
 
     if args.train_final:
-        run = train_final(samples, args.variants, args.classifiers, args.splits,
-                          args.inner_splits, args.seed, n_jobs=-1)
-        model_path, report_path = write_final_run(run, args.train_final)
-        print(format_report(run))
-        print("saved %s and %s" % (model_path, report_path))
+        run = train_final(samples, comparison_variants=args.variants, comparison_classifiers=args.classifiers,
+                          outer_splits=args.splits, seed=args.seed, n_jobs=-1)
+        paths = write_final_run(run, args.train_final)
+        print(paths[2].read_text(encoding="utf-8"))
+        print("saved %s" % ", ".join(map(str, paths)))
         return 0
 
     if args.save:
-        model = train_model(samples, args.variant, args.classifier, args.seed)
-        print("saved %s (%s, %s)" % (model.save(args.save), model.variant.id, model.classifier))
+        calibration = None if args.calibration == "none" else args.calibration
+        model = train_model(samples, args.variant, args.classifier, args.seed, calibration)
+        print("saved %s (%s, %s, calibration %s)"
+              % (model.save(args.save), model.variant.id, model.classifier, model.calibration))
         return 0
 
     X, y, groups = samples_to_arrays(samples)
