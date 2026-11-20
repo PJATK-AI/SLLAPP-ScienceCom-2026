@@ -35,8 +35,8 @@ SLLAPP is the Sign Language Learning Application project for ScienceCom 2026,
 maintained by PJATK AI.
 
 The backend includes a standalone Java engine for the spelling game. It also
-creates player sessions over WebSocket, validates hand samples, stores game
-results and serves an ordered ranking over REST. The
+creates player sessions over WebSocket, completes letters from stable AI
+predictions, stores game results and serves an ordered ranking over REST. The
 frontend workspace contains a Vue WebSocket session test panel, a MediaPipe hand
 tracker and its Vue wrapper. The panel creates and resumes sessions and sends
 synthetic hand samples for transport testing.
@@ -250,6 +250,10 @@ player data and `positionId: null` for the camera check. After that response,
 send `socket.send(JSON.stringify({ type: 'start_game' }))` to start a 60-second
 round. The server returns `RUNNING` with the current letter, position, remaining
 time and score. Copy the current `positionId` into `hand_sample` and `no_hand`.
+With AI enabled, the server completes a letter after three matching predictions
+at confidence `0.80` or higher, with at most `350ms` between their samples by
+default. Repeated letters require two consecutive `no_hand` messages before
+prediction resumes. See the [recognition rules and settings](docs/api.md#letter-recognition).
 
 The server sends `FINISHED` at the end of the round and saves the score to the
 ranking, including for disconnected players. By default, a never-started
@@ -303,9 +307,10 @@ From `backend/`:
 ```
 
 On Linux or macOS, use `sh mvnw -B verify`. The tests cover the game catalog,
-scoring and progression, timed WebSocket games and sample validation, SQLite
-persistence and ranking HTTP responses. Integration tests use random server
-ports, temporary databases and a controlled clock for game deadlines.
+scoring and progression, recognition and hand release, timed WebSocket games,
+sample validation, SQLite persistence and ranking HTTP responses. Integration
+tests use random server ports, temporary databases and a controlled clock for
+game deadlines.
 
 To run only the standalone game tests from `backend/`, use
 `sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.

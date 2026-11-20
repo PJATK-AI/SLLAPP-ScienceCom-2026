@@ -11,7 +11,7 @@ import pl.pjatk.ai.sllapp.game.WordCatalog;
 import pl.pjatk.ai.sllapp.game.WordPicker;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(SessionProperties.class)
+@EnableConfigurationProperties({SessionProperties.class, RecognitionProperties.class})
 class SessionConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "sessionWordPickerFactory")

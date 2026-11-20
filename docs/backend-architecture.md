@@ -121,11 +121,19 @@ its replacement. `SessionConnection` serializes outbound sends through
 
 `SampleMessageValidator` checks each sample against the session's current
 position before the connection advances its sequence. A `SampleMessage` retains
-the position ID and hand JSON, including additional fields. The latest accepted
-sample belongs to its connection. Diagnostic acknowledgements are controlled by
-`SessionWebSocketProperties`. Server callers use
-`SessionConnectionRegistry.completePosition` to apply a confirmed completion and
-publish the resulting state to the current socket.
+the position ID and hand JSON, including additional fields. Diagnostic
+acknowledgements are controlled by `SessionWebSocketProperties`.
+
+`GameSession` holds `LetterRecognition`, which tracks the prediction streak,
+hand release and the single in-flight request. The registry reserves that slot
+under the session monitor and submits to `AiPredictionClient` outside the
+monitor. The completion callback acquires the monitor to release the slot and
+verify the running game, owning socket, active position and elapsed budget
+before updating the streak. Sample timing and the call budget use monotonic
+time. `SessionConnectionRegistry.completePosition` is the common path for
+advancing the engine and publishing a confirmed completion. A hand release
+publishes a new state at the same position. See the
+[recognition rules and settings](api.md#letter-recognition).
 
 `ClockConfiguration` supplies the UTC `Clock` used for the creation expiry, game
 deadline and finished expiry. The registry checks the deadline under the session
@@ -142,6 +150,7 @@ sequenceDiagram
     participant WS as SessionWebSocketHandler
     participant Sessions as SessionService
     participant Connections as SessionConnectionRegistry
+    participant AI as AiPredictionClient
     Client->>WS: create_session (nickname, selectedHand)
     WS->>Sessions: validate and store player session
     Sessions-->>WS: GameSession
@@ -155,6 +164,15 @@ sequenceDiagram
     WS->>WS: validate position and accept a fresh sequence
     opt Diagnostic mode and accepted sample
         WS-->>Client: sample_ack
+    end
+    opt Eligible hand sample in a running round
+        WS->>Connections: reserve the session's prediction slot
+        Connections->>AI: submit hand outside the session monitor
+        AI-->>Connections: prediction or failure
+        Connections->>Connections: check and apply the result under the session monitor
+    end
+    opt Position completion or hand release
+        Connections-->>Client: game_state (RUNNING)
     end
     Connections->>Sessions: save result when the game reaches its deadline
     Connections-->>Client: game_state (FINISHED, final score) if connected
@@ -184,9 +202,8 @@ an explicit byte-count `Content-Length`. The Python service requires
 `coordinateSpace: "MEDIAPIPE_IMAGE"`, physical `handedness` and 21 image landmarks.
 The caller supplies the coordinate space, which the current camera stream omits.
 The result is a prediction only for HTTP 200 with a supported uppercase letter
-and numeric confidence from 0 to 1, inclusive. Gameplay callers can use the
-prediction once they have selected a sample. Session acceptance and scoring are
-separate operations.
+and numeric confidence from 0 to 1, inclusive. The session applies the
+[recognition rules](api.md#letter-recognition) to the result.
 
 | Failure | Cause |
 | --- | --- |
@@ -238,7 +255,7 @@ queries. WebSocket message records live in `web.websocket.message`, REST DTOs in
 | `config.ai` | Prediction client settings and Spring bean |
 | `config.application` | UTC clock and scheduling |
 | `config.moderation` | Blocked-word resource location |
-| `config.session` | Player session lifetime |
+| `config.session` | Player session lifetime and letter recognition settings |
 | `config.storage` | SQLite data source and storage directory |
 | `config.web` | REST CORS, WebSocket endpoint and message limits |
 
@@ -261,6 +278,7 @@ backend/src/
 │   │   │   │   ├── ModerationConfiguration.java
 │   │   │   │   └── ModerationProperties.java
 │   │   │   ├── session/
+│   │   │   │   ├── RecognitionProperties.java
 │   │   │   │   ├── SessionConfiguration.java
 │   │   │   │   └── SessionProperties.java
 │   │   │   ├── storage/
@@ -281,6 +299,7 @@ backend/src/
 │   │   ├── model/
 │   │   │   ├── GameResult.java
 │   │   │   ├── GameSession.java
+│   │   │   ├── LetterRecognition.java
 │   │   │   ├── RankingEntry.java
 │   │   │   └── SelectedHand.java
 │   │   ├── moderation/
@@ -340,13 +359,16 @@ backend/src/
     │           ├── SessionExpiryTest.java
     │           ├── SessionGameTest.java
     │           ├── SessionOwnershipTest.java
+    │           ├── SessionRecognitionTest.java
     │           ├── SessionSamplesTest.java
     │           ├── SessionWebSocketTest.java
     │           ├── WebSocketSizeTest.java
     │           └── WebSocketTestClient.java
     └── resources/
-        └── moderation/
-            └── test-blocked-words.txt
+        ├── moderation/
+        │   └── test-blocked-words.txt
+        └── recognition/
+            └── camera-trace.csv
 ```
 
 | File | Responsibility |
@@ -380,8 +402,9 @@ file preserves saved results across application restarts.
 
 The `config` package contains Spring configuration and the types bound through
 `@ConfigurationProperties`. `StorageProperties` binds `sllapp.storage.directory`.
-Session, moderation and web defaults are declared in `SessionProperties`,
-`ModerationProperties`, `SessionWebSocketProperties` and `WebProperties`.
+Session, recognition, moderation and web defaults are declared in
+`SessionProperties`, `RecognitionProperties`, `ModerationProperties`,
+`SessionWebSocketProperties` and `WebProperties`.
 Creation expiry defaults to `5m`, game duration to `60s` and the finished resume
 window to `5m`. All three durations must be positive.
 See the [configuration table](api.md#websocket-configuration).
@@ -450,6 +473,9 @@ UTF-8 size boundaries, fragmented text and oversized binary messages.
 start, completion, state-specific samples, scheduled finish, resume, ranking
 and persistence retries after expiry. `SessionOwnershipTest` checks concurrent
 start and persistence after a socket send failure.
+`SessionRecognitionTest` controls sample time and AI responses to check scoring,
+streak resets, release, expired results and the single-call rule. It also
+replays an event timeline derived from a camera recording.
 `BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
 duplicates, NFKC normalization, the bundled list, and startup errors for missing,
 unreadable, malformed, empty or invalid files and directories. Other session

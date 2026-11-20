@@ -15,6 +15,7 @@ public final class GameSession {
     private final String nickname;
     private final SelectedHand selectedHand;
     private final Instant createdAt;
+    private final LetterRecognition recognition = new LetterRecognition();
     private Instant expiresAt;
     private Instant deadline;
     private GameEngine engine;
@@ -35,6 +36,7 @@ public final class GameSession {
     public SelectedHand selectedHand() { return selectedHand; }
     public Instant createdAt() { return createdAt; }
     public Instant expiresAt() { return expiresAt; }
+    public LetterRecognition recognition() { return recognition; }
 
     public boolean start(Instant now, Duration duration, Duration finishedTtl, Supplier<WordPicker> pickers) {
         if (deadline != null || !now.isBefore(expiresAt)) return false;
@@ -51,13 +53,16 @@ public final class GameSession {
     }
 
     public boolean completePosition(long positionId, Instant now) {
-        return engine != null && engine.completePosition(positionId, now);
+        if (engine == null || !engine.completePosition(positionId, now)) return false;
+        recognition.positionChanged(engine.state(now).repeatsPreviousLetter());
+        return true;
     }
 
     public boolean finishIfDue(Instant now) {
         if (engine == null || now.isBefore(deadline)) return false;
         result = new GameResult(sessionId.toString(), nickname, engine.state(now).score(), deadline);
         engine = null;
+        recognition.resetInput();
         return true;
     }
 
