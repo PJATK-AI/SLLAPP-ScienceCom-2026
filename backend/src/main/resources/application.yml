@@ -6,6 +6,10 @@ spring:
       mode: always
 
 sllapp:
+  ai:
+    enabled: ${AI_PREDICTION_ENABLED:false}
+    base-url: ${AI_PREDICTION_BASE_URL:}
+    timeout: ${AI_PREDICTION_TIMEOUT:250ms}
   storage:
     directory: ${DATA_DIR:./data}
 

@@ -73,6 +73,24 @@ cd backend
 On Linux or macOS, use `sh mvnw spring-boot:run` from `backend/`.
 The server listens on **http://127.0.0.1:8080**.
 
+### Connect the prediction service
+
+The Java prediction client is disabled by default. Start the
+[Python prediction service](model/README.md#prediction-service) with a model
+artifact it can load. Export the settings from [the backend example](backend/.env.example)
+to the backend process and enable the client. On Linux or macOS, run from
+`backend/`.
+
+```sh
+AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 AI_PREDICTION_TIMEOUT=250ms sh mvnw spring-boot:run
+```
+
+The timeout defaults to `250ms`. Enabling the client requires an absolute
+HTTP(S) base URL. At startup the backend logs the model metadata or a health
+check failure while continuing to serve requests. The
+[backend architecture](docs/backend-architecture.md#ai-prediction-client)
+describes the client interface and diagnostics.
+
 ### Start the frontend
 
 The web application reads the backend REST API address from

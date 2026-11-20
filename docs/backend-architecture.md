@@ -169,6 +169,58 @@ sequenceDiagram
 each `RankingEntry` to a `RankingEntryResponse` with `rank`, `nickname` and `score`.
 See the [API reference](api.md).
 
+## AI prediction client
+
+`AiPredictionClient.predict(sessionId, hand)` accepts a session UUID and the
+validated JSON `hand` object. It returns a `CompletionStage<PredictionResult>`
+with a typed letter and confidence or a typed failure. A dedicated executor
+runs up to four exchanges at once and rejects further submissions immediately
+with `OVERLOADED`. One Spring `RestClient` and one JDK `HttpClient` reuse
+connections. The call timeout covers connecting, receiving headers and reading
+the response body. Prediction requests have no application-level retries.
+
+The client sends the `hand` object unchanged to `POST /predict` as UTF-8 JSON with
+an explicit byte-count `Content-Length`. The Python service requires
+`coordinateSpace: "MEDIAPIPE_IMAGE"`, physical `handedness` and 21 image landmarks.
+The caller supplies the coordinate space, which the current camera stream omits.
+The result is a prediction only for HTTP 200 with a supported uppercase letter
+and numeric confidence from 0 to 1, inclusive. Gameplay callers can use the
+prediction once they have selected a sample. Session acceptance and scoring are
+separate operations.
+
+| Failure | Cause |
+| --- | --- |
+| `DISABLED` | The client is disabled |
+| `INVALID_REQUEST` | Invalid local input or HTTP 400 |
+| `PAYLOAD_TOO_LARGE` | HTTP 413 |
+| `REJECTED_SAMPLE` | HTTP 422 |
+| `SERVICE_ERROR` | HTTP 5xx |
+| `UNEXPECTED_STATUS` | Other HTTP status |
+| `CONTRACT_ERROR` | HTTP 200 with an invalid prediction body |
+| `TIMEOUT` | The call exceeded its transport deadline |
+| `TRANSPORT_ERROR` | A connection or other transport failure |
+| `OVERLOADED` | All prediction workers are occupied |
+
+Each failed prediction increments an in-process counter for its category and
+logs the session UUID, category, HTTP status when known and cumulative count.
+`failureCount(kind)` reads that counter. A failure can carry the service's
+optional `error` text for the caller. Logs contain neither hand data nor error
+response bodies. `DISABLED` is a configuration state and does not count as a
+failed prediction.
+
+| Spring property | Environment variable | Default |
+| --- | --- | --- |
+| `sllapp.ai.enabled` | `AI_PREDICTION_ENABLED` | `false` |
+| `sllapp.ai.base-url` | `AI_PREDICTION_BASE_URL` | Required when enabled |
+| `sllapp.ai.timeout` | `AI_PREDICTION_TIMEOUT` | `250ms` |
+
+An enabled client requires an absolute HTTP(S) URL and a positive timeout.
+When enabled, it calls `GET /health` once after backend startup and logs the
+model variant, classifier, 16 letters and artifact SHA-256. A failed health
+check logs a warning and the application continues to run. See the
+[Python service contract](../model/README.md#prediction-service) and
+[backend startup example](../README.md#connect-the-prediction-service).
+
 ## Code structure
 
 `game` owns the standalone game rules and state. `web` owns the REST and
@@ -183,6 +235,7 @@ queries. WebSocket message records live in `web.websocket.message`, REST DTOs in
 
 | Package | Responsibility |
 | --- | --- |
+| `config.ai` | Prediction client settings and Spring bean |
 | `config.application` | UTC clock and scheduling |
 | `config.moderation` | Blocked-word resource location |
 | `config.session` | Player session lifetime |
@@ -194,7 +247,13 @@ backend/src/
 ├── main/
 │   ├── java/pl/pjatk/ai/sllapp/
 │   │   ├── SllappApplication.java
+│   │   ├── ai/
+│   │   │   ├── AiPredictionClient.java
+│   │   │   └── PredictionResult.java
 │   │   ├── config/
+│   │   │   ├── ai/
+│   │   │   │   ├── AiConfiguration.java
+│   │   │   │   └── AiProperties.java
 │   │   │   ├── application/
 │   │   │   │   ├── ClockConfiguration.java
 │   │   │   │   └── SchedulingConfiguration.java
@@ -376,6 +435,12 @@ The game tests use fixed instants and controlled word picks without a Spring
 context. They check the bundled catalog, word pool refill, scoring, position
 progression, expiry and repeated letters. Run them from `backend/` with
 `sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
+
+The prediction tests use `MockRestServiceServer` for request and response
+validation. A local HTTP server checks the wire byte count, connection reuse,
+asynchronous execution, executor saturation and timeouts in both the header
+and body phases. Startup tests verify settings, metadata and graceful operation
+when health checks fail.
 
 The WebSocket tests cover creation, nickname validation, resuming, concurrent
 ownership changes, delayed close callbacks, expiry with a controlled clock,
