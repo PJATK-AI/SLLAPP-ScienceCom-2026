@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Game preview · SLLAPP</title>
+        <link rel="stylesheet" href="/game-test/styles.css">
+        <script src="/game-test/app.js" defer></script>
+    </head>
+    <body>
+        <main>
+            <header class="page-heading">
+                <p class="project">SLLAPP</p>
+                <h1>Game preview</h1>
+            </header>
+
+            <section class="card" aria-label="Game">
+                <p id="game-status" role="status">Ready to start</p>
+                <div id="word" class="word">Start a game to reveal the word.</div>
+
+                <dl class="metrics">
+                    <div><dt>Score</dt><dd id="score">—</dd></div>
+                    <div><dt>Last award</dt><dd id="score-change">—</dd></div>
+                    <div><dt>Time left</dt><dd id="time-left">—</dd></div>
+                </dl>
+                <dl class="position">
+                    <div><dt>Position ID</dt><dd id="position-id">—</dd></div>
+                    <div><dt>Repeated letter</dt><dd id="repeated-letter">—</dd></div>
+                </dl>
+
+                <div class="actions">
+                    <button id="start-game" type="button">Start game</button>
+                    <button id="complete-letter" type="button" disabled>Complete letter</button>
+                </div>
+                <p id="game-feedback" class="feedback" role="status"></p>
+            </section>
+        </main>
+    </body>
+</html>

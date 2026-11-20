@@ -82,6 +82,21 @@ With the default rules, completing a 4-letter word adds 120 points.
 Score overflow raises an arithmetic error before the engine changes the
 position or draws the next word.
 
+### Game engine tester
+
+The `game-test` Spring profile activates `GameTestController` from the test
+classpath. It serves the HTML, CSS, JavaScript and JSON endpoints under
+`/game-test` at `127.0.0.1:8081`. The controller runs one interactive
+game in memory and serializes its operations. Requests include a game ID
+so a position from a previous game cannot complete a position after a reset.
+
+The preview starts a 60-second round with `GameRules.defaults()`,
+`RandomWordPicker`, the bundled catalog and the backend clock. The
+**Complete letter** action passes the displayed position ID to the engine,
+simulating a recognized sign. The test profile stores its SQLite database
+under `target/game-test-data`. See the
+[README startup instructions](../README.md#open-the-game-engine-tester).
+
 ## WebSocket transport
 
 `SessionWebSocketConfiguration` registers the JSON endpoint `/ws`.
