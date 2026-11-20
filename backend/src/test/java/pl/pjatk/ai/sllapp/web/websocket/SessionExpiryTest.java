@@ -50,7 +50,7 @@ class SessionExpiryTest {
             assertThat(socket.closed.get(5, TimeUnit.SECONDS)).isEqualTo(1008);
             var sessions = app.getBean(SessionService.class);
             assertThat(sessions.find(id)).isEmpty();
-            assertThat(sessions.removeExpired()).isEmpty();
+            assertThat(sessions.all()).isEmpty();
             try (var next = new WebSocketTestClient(client, port, null)) {
                 next.send("{\"type\":\"resume_session\",\"sessionId\":\"" + id + "\"}");
                 assertThat(next.closed.get(5, TimeUnit.SECONDS)).isEqualTo(1008);

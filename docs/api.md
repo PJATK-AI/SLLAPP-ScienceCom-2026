@@ -62,35 +62,107 @@ words.
 
 `selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
 
+### Start a game
+
+Send this on the connection bound to a `CREATED` session.
+
+```json
+{"type":"start_game"}
+```
+
+The server starts one game and returns its current position.
+
+```json
+{
+  "type": "game_state",
+  "sessionId": "6a386307-3c19-4e3b-90c7-ae405835f825",
+  "status": "RUNNING",
+  "nickname": "Ola",
+  "selectedHand": "RIGHT",
+  "positionId": 1,
+  "word": "LAS",
+  "letterIndex": 0,
+  "expectedLetter": "L",
+  "remainingMs": 60000,
+  "score": 0,
+  "requiresRelease": false
+}
+```
+
+`letterIndex` is zero-based. `expectedLetter` is a one-character string.
+`requiresRelease` is true when the active letter repeats the preceding
+completed letter, including across words. The server sends a fresh `RUNNING`
+state after each accepted server-side position completion and on resume.
+`remainingMs` is the remaining whole milliseconds at the time of that snapshot.
+The server uses the default [game rules](backend-architecture.md#standalone-game-engine).
+
+An unbound connection receives `SESSION_REQUIRED`. A second `start_game` on
+an available session receives an error and leaves the game deadline in place.
+
+```json
+{"type":"error","code":"GAME_ALREADY_STARTED","message":"This session already started a game."}
+```
+
+### Finish a game
+
+At the game deadline, scoring ends and the server saves one ranking result for
+the session, even if the player disconnected. The current connection receives
+the final state. A successful resume after the deadline returns the same score.
+
+```json
+{
+  "type": "game_state",
+  "sessionId": "6a386307-3c19-4e3b-90c7-ae405835f825",
+  "status": "FINISHED",
+  "nickname": "Ola",
+  "selectedHand": "RIGHT",
+  "positionId": null,
+  "remainingMs": 0,
+  "score": 120
+}
+```
+
 ### Resume a session
 
 ```json
 {"type":"resume_session","sessionId":"6a386307-3c19-4e3b-90c7-ae405835f825"}
 ```
 
-Send this on a new connection to receive the stored `game_state`. The server
+Send this on a new connection to receive the current `game_state`. The server
 replaces the previous connection, closing it with code 1000. Each connection
 can create or resume only one session; another such command returns
 `SESSION_ALREADY_BOUND`. Invalid UUID syntax receives `INVALID_SESSION`;
 an unknown or expired UUID closes the connection with code 1008.
 
 Sessions live in memory in one backend process. A restart removes them.
-`sllapp.session.creation-ttl` defaults to `5m` from creation; reconnecting does
-not extend the expiry time. Disconnecting leaves the session available until
-that deadline.
+A session in `CREATED` can start or resume before its creation expiry
+(`sllapp.session.creation-ttl`, default `5m`). Once started, it can resume until
+the game deadline plus `sllapp.session.finished-ttl` (default `5m`). The game
+deadline is the accepted start time plus `sllapp.session.game-duration`
+(default `60s`). These deadlines stay fixed through activity and reconnection.
 
-The server checks expiry on incoming messages and scans for expired sessions
-every second. The scan removes expired sessions and closes idle connections
-with code 1008. Samples and reconnections do not renew the deadline.
+The server checks deadlines on incoming messages and in a sweep every second.
+The sweep finishes due games and closes expired sockets with code 1008.
+The stored ranking timestamp is the game deadline, including when the sweep
+observes it later. A failed result write is retried by the sweep while the
+backend process runs, including after the resume window expires.
 
 ### Send hand samples
 
-Both sample types require a bound session, an integer `seq` from 0 to
-9007199254740991 and an explicit `positionId: null`. Copy `positionId` from
-the latest `game_state`; the implemented `CREATED` state uses null. A missing
-or non-null position is invalid. Sequence numbers increase across both types;
-gaps are allowed. Reconnecting starts a new sequence. Valid messages with an
-old or duplicate sequence are ignored. Invalid messages do not consume it.
+Both sample types require a bound session and an integer `seq` from 0 to
+9007199254740991. In `CREATED` and `RUNNING`, copy `positionId` from the latest
+`game_state`.
+
+| State | Sample behavior |
+| --- | --- |
+| `CREATED` | Requires an explicit `positionId: null` for the camera check. |
+| `RUNNING` | Requires the active positive safe integer `positionId`. Null, missing, malformed and stale IDs receive `INVALID_SAMPLE`. |
+| `FINISHED` | Both sample types receive `GAME_FINISHED`. The connection stays open until expiry. |
+
+Sequence numbers increase across both types on the same connection. Gaps are
+allowed, and reconnecting starts a new sequence. Valid messages with an old or
+duplicate sequence are ignored. Invalid messages do not consume a sequence
+number. Samples alone leave the position and score unchanged.
 
 `hand_sample` contains a `hand` object with `handedness: LEFT` or `RIGHT` and
 exactly 21 `landmarks`. Every point has finite numeric `x`, `y`, `z`; coordinates
@@ -135,10 +207,16 @@ This complete synthetic sample illustrates the format. `score` is optional:
 }
 ```
 
-When no hand is detected, send:
+When no hand is detected during the camera check, send:
 
 ```json
 {"type":"no_hand","seq":1,"positionId":null}
+```
+
+For an active game, use its current position ID.
+
+```json
+{"type":"no_hand","seq":2,"positionId":1}
 ```
 
 Samples before creating/resuming a session receive `SESSION_REQUIRED`.
@@ -168,7 +246,9 @@ open so the client can correct its request:
 | `UNKNOWN_TYPE` | Unrecognized string `type` |
 | `INVALID_SESSION` | Invalid player data or UUID syntax |
 | `SESSION_ALREADY_BOUND` | Another create/resume on a bound socket |
-| `SESSION_REQUIRED` | A sample sent before create/resume |
+| `SESSION_REQUIRED` | Start or sample sent before create/resume |
+| `GAME_ALREADY_STARTED` | Start sent after this session already started a game |
+| `GAME_FINISHED` | Sample sent during the finished session's resume window |
 | `INVALID_SAMPLE` | Invalid sequence, position or hand data |
 | `MESSAGE_TOO_LARGE` | Text exceeds the application limit but not the hard limit |
 
@@ -183,7 +263,9 @@ open so the client can correct its request:
 
 | Spring property | Default | Meaning |
 | --- | --- | --- |
-| `sllapp.session.creation-ttl` | `5m` | Fixed lifetime from session creation; must be positive |
+| `sllapp.session.creation-ttl` | `5m` | Time to start or resume after creation. Must be positive. |
+| `sllapp.session.game-duration` | `60s` | Time from accepted start to the game deadline. Must be positive. |
+| `sllapp.session.finished-ttl` | `5m` | Resume window measured from the game deadline. Must be positive. |
 | `sllapp.moderation.blocked-words-location` | `classpath:moderation/blocked-words.txt` | Blocked-word file; must start with `classpath:` or `file:` |
 | `sllapp.websocket.max-message-bytes` | `65536` | Application limit for text, in UTF-8 bytes |
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
@@ -268,4 +350,4 @@ for callers to invoke before sending. The session client sends the points it rec
 The composable releases listeners, timers and the socket when its Vue scope is
 disposed, or when `dispose()` is called. Events from replaced sockets cannot
 change the current state. Session data is held only in memory. The current
-frontend validates the implemented `CREATED` state with explicit `positionId:null`.
+frontend camera panel uses the `CREATED` state with explicit `positionId: null`.
