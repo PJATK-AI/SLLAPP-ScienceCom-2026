@@ -1,10 +1,102 @@
 # Backend architecture
 
-The SLLAPP backend uses Java 21 and Spring Boot. It manages player sessions over
-WebSocket and validates hand samples. Game results are stored in SQLite and
-exposed through a ranking REST API.
+The SLLAPP backend uses Java 21 and Spring Boot. It provides a standalone
+spelling game engine, manages player sessions over WebSocket and validates
+hand samples. Game results are stored in SQLite and exposed through a ranking
+REST API.
 
 See the [README](../README.md) for local setup and commands.
+
+## Standalone game engine
+
+The `pl.pjatk.ai.sllapp.game` package uses the JDK. A Java caller creates one
+`GameEngine` and one `WordPicker` per game. The caller provides timestamps and
+serializes operations on the engine. WebSocket sessions start an engine on
+`start_game` and publish its position and score through `game_state`.
+See the [API reference](api.md#websocket-transport).
+
+```java
+import java.time.Instant;
+import pl.pjatk.ai.sllapp.game.GameEngine;
+import pl.pjatk.ai.sllapp.game.GameRules;
+import pl.pjatk.ai.sllapp.game.RandomWordPicker;
+import pl.pjatk.ai.sllapp.game.WordCatalog;
+
+var catalog = WordCatalog.loadBundled();
+var now = Instant.now();
+var game = new GameEngine(GameRules.defaults(), new RandomWordPicker(catalog), now, now.plusSeconds(60));
+var current = game.state(now);
+char expectedLetter = current.expectedLetter();
+
+// Call this when the current letter has been recognized.
+boolean accepted = game.completePosition(current.positionId(), Instant.now());
+```
+
+The catalog can be shared across games. The bundled list is UTF-8, with one
+uppercase Polish word per line and several entries for each length from 3 to 7.
+See [`game/words.txt`](../backend/src/main/resources/game/words.txt).
+
+Catalog validation strips surrounding whitespace, skips empty lines
+and accepts the letters `A B C E I L M N O P R S T U W Y`. It reports invalid
+lengths, unsupported characters and duplicate words with line numbers.
+`WordCatalog.validate(lines, maxWordLength)` returns the issues.
+`WordCatalog.fromLines(lines, maxWordLength)` builds a custom catalog from
+valid input. The classpath loader reports resource read failures as
+`IOException`.
+
+`RandomWordPicker` checks for at least one word at every playable length
+before the engine starts. It draws from a separate pool for each length and
+refills a pool once it is empty. Callers can supply a seeded random generator
+or a deterministic `WordPicker` that provides valid words for every playable
+length. A maximum above 7 needs a custom word source with broader coverage.
+
+Each game starts at position ID 1, at the first letter of a 3-letter word.
+Completing the active position advances to the next letter and assigns a new
+ID within JavaScript's safe integer range. Completing a word draws a word
+one letter longer, up to the configured maximum. The immutable `GameState`
+exposes the position ID, word, zero-based letter index, expected letter,
+score, remaining milliseconds, finish status and `repeatsPreviousLetter`.
+That flag compares the current letter with the last completed letter,
+including across word boundaries.
+
+Completions with stale or unknown IDs return `false`. A state read or
+completion at or after the deadline finishes the game, preserves the final
+position and score, and sets the remaining time to zero. The completion
+returns `false`. Remaining time is reported in whole milliseconds, while
+expiry uses the instant itself.
+
+The immutable `GameRules` takes a maximum word length of at least 3 and
+nonnegative `BigDecimal` scoring values.
+
+| Setting | Default |
+| --- | ---: |
+| `maxWordLength` | 7 |
+| `letterPoints` | 10 |
+| `wordBonus` | 20 |
+| `multiplierStep` | 1 |
+
+For a word of length `L`, the multiplier is `1 + (L - 3) × multiplierStep`.
+Each accepted position adds the scaled letter award. The last position
+also adds the scaled word bonus for the same word. The engine rounds
+each award separately to the nearest integer with halves rounded up.
+With the default rules, completing a 4-letter word adds 120 points.
+Score overflow raises an arithmetic error before the engine changes the
+position or draws the next word.
+
+### Game engine tester
+
+The `game-test` Spring profile activates `GameTestController` from the test
+classpath. It serves the HTML, CSS, JavaScript and JSON endpoints under
+`/game-test` at `127.0.0.1:8081`. The controller runs one interactive
+game in memory and serializes its operations. Requests include a game ID
+so a position from a previous game cannot complete a position after a reset.
+
+The preview starts a 60-second round with `GameRules.defaults()`,
+`RandomWordPicker`, the bundled catalog and the backend clock. The
+**Complete letter** action passes the displayed position ID to the engine,
+simulating a recognized sign. The test profile stores its SQLite database
+under `target/game-test-data`. See the
+[README startup instructions](../README.md#open-the-game-engine-tester).
 
 ## WebSocket transport
 
@@ -14,29 +106,35 @@ See the [README](../README.md) for local setup and commands.
 handshake. `SessionWebSocketTest` checks the running server with JDK HTTP and
 WebSocket clients.
 
-`model.GameSession` is an immutable player session with UUID, nickname,
-selected hand and creation/expiry timestamps. `SessionService` holds sessions
-in memory and uses the injected UTC `Clock` (from `ClockConfiguration`) to check
-expiry. `NicknamePolicy` validates player names. It uses `BlockedWordList`, which reads the blocked-word
-file from `sllapp.moderation.blocked-words-location` once at startup.
+`model.GameSession` holds player metadata and the game lifecycle. `SessionService`
+keeps sessions in memory and validates player names through `NicknamePolicy`.
+`BlockedWordList` reads `sllapp.moderation.blocked-words-location` once at startup.
+On start, the session creates a `GameEngine` with `GameRules.defaults()` and its
+own picker. The production picker factory shares the bundled `WordCatalog`.
 
-`SessionWebSocketHandler` decodes messages and dispatches `create_session` and
-`resume_session`. `SessionConnectionRegistry` tracks the active socket for each game
-session, replaces it on reconnect and closes it on expiry. Replacement and
-sample acceptance use the same session lock. Closing an old socket cannot
-detach its replacement. `SessionConnection` serializes outbound sends through
+`SessionWebSocketHandler` dispatches `create_session`, `resume_session`,
+`start_game`, `hand_sample` and `no_hand`. `SessionConnectionRegistry` tracks
+the current socket for each session. The same session monitor serializes socket
+replacement, game operations and removal. Closing an old socket cannot detach
+its replacement. `SessionConnection` serializes outbound sends through
 `ConcurrentWebSocketSessionDecorator`.
 
-`SampleMessageValidator` validates `hand_sample` and `no_hand`. A `SampleMessage`
-retains the hand JSON, including additional fields. Each `SessionConnection`
-stores only the latest accepted sample and sequence number. Validation precedes
-sequence advancement; ownership and expiry are checked under the session lock.
-Diagnostic acknowledgements are controlled by `SessionWebSocketProperties`.
+`SampleMessageValidator` checks each sample against the session's current
+position before the connection advances its sequence. A `SampleMessage` retains
+the position ID and hand JSON, including additional fields. The latest accepted
+sample belongs to its connection. Diagnostic acknowledgements are controlled by
+`SessionWebSocketProperties`. Server callers use
+`SessionConnectionRegistry.completePosition` to apply a confirmed completion and
+publish the resulting state to the current socket.
 
-A task in `SessionConnectionRegistry` runs every second. It asks `SessionService` to
-remove expired sessions and closes their current sockets. Incoming messages also
-check the deadline. Tests inject a controllable clock to check exact expiry and
-ensure that sample traffic and reconnects do not extend the session lifetime.
+`ClockConfiguration` supplies the UTC `Clock` used for the creation expiry, game
+deadline and finished expiry. The registry checks the deadline under the session
+monitor on incoming messages, resume and position completion, and in a sweep
+every second. On finish, it freezes the score, attempts one SQLite insert and
+publishes `FINISHED` to the current socket. The result timestamp is the game
+deadline. The sweep retries pending writes, including for disconnected games
+and after public expiry. After expiry it closes any bound socket with code 1008
+and removes sessions once their results are stored.
 
 ```mermaid
 sequenceDiagram
@@ -44,24 +142,22 @@ sequenceDiagram
     participant WS as SessionWebSocketHandler
     participant Sessions as SessionService
     participant Connections as SessionConnectionRegistry
-    participant Validator as SampleMessageValidator
-    participant Connection as SessionConnection
     Client->>WS: create_session (nickname, selectedHand)
     WS->>Sessions: validate and store player session
     Sessions-->>WS: GameSession
     WS->>Connections: bind socket to session
     Connections-->>Client: game_state (CREATED, sessionId, positionId=null)
+    Client->>WS: start_game
+    WS->>Sessions: start game under the session monitor
+    WS-->>Client: game_state (RUNNING, current position)
     Client->>WS: hand_sample / no_hand
-    WS->>Connections: check connection ownership
-    WS->>Sessions: check expiry
-    WS->>Validator: validate sample fields
-    Validator-->>WS: SampleMessage
-    WS->>Connection: accept sample if sequence increases
-    Note over WS,Connection: Ownership, expiry, validation and acceptance use the same session lock
-    opt Diagnostic mode
-        WS->>Connection: send acknowledgement for accepted sample
-        Connection-->>Client: sample_ack
+    WS->>Connections: check ownership and reconcile the deadline
+    WS->>WS: validate position and accept a fresh sequence
+    opt Diagnostic mode and accepted sample
+        WS-->>Client: sample_ack
     end
+    Connections->>Sessions: save result when the game reaches its deadline
+    Connections-->>Client: game_state (FINISHED, final score) if connected
 ```
 
 ## Ranking HTTP API
@@ -127,8 +223,9 @@ check logs a warning and the application continues to run. See the
 
 ## Code structure
 
-`web` owns the REST and WebSocket protocols. `service` manages game sessions and
-ranks results. Each class in `service` uses `@Service` and has a name ending in
+`game` owns the standalone game rules and state. `web` owns the REST and
+WebSocket protocols. `service` manages game sessions and ranks results. Each
+class in `service` uses `@Service` and has a name ending in
 `Service`. `moderation` contains the nickname rules and the blocked-word list.
 `model` contains the application data types, and `repository` implements the SQL
 queries. WebSocket message records live in `web.websocket.message`, REST DTOs in
@@ -174,6 +271,13 @@ backend/src/
 │   │   │       ├── SessionWebSocketProperties.java
 │   │   │       ├── WebConfiguration.java
 │   │   │       └── WebProperties.java
+│   │   ├── game/
+│   │   │   ├── GameEngine.java
+│   │   │   ├── GameRules.java
+│   │   │   ├── GameState.java
+│   │   │   ├── RandomWordPicker.java
+│   │   │   ├── WordCatalog.java
+│   │   │   └── WordPicker.java
 │   │   ├── model/
 │   │   │   ├── GameResult.java
 │   │   │   ├── GameSession.java
@@ -204,6 +308,8 @@ backend/src/
 │   │           └── SessionWebSocketHandler.java
 │   └── resources/
 │       ├── application.yml
+│       ├── game/
+│       │   └── words.txt
 │       ├── moderation/
 │       │   ├── blocked-words.txt
 │       │   ├── LICENSE-LDNOOBW.txt
@@ -211,6 +317,11 @@ backend/src/
 │       └── schema.sql
 └── test/
     ├── java/pl/pjatk/ai/sllapp/
+    │   ├── game/
+    │   │   ├── GameEngineTest.java
+    │   │   ├── GameRulesTest.java
+    │   │   ├── RandomWordPickerTest.java
+    │   │   └── WordCatalogTest.java
     │   ├── moderation/
     │   │   ├── BlockedWordListTest.java
     │   │   └── NicknamePolicyTest.java
@@ -227,6 +338,7 @@ backend/src/
     │           ├── SampleFixtures.java
     │           ├── SampleMessageValidatorTest.java
     │           ├── SessionExpiryTest.java
+    │           ├── SessionGameTest.java
     │           ├── SessionOwnershipTest.java
     │           ├── SessionSamplesTest.java
     │           ├── SessionWebSocketTest.java
@@ -270,6 +382,8 @@ The `config` package contains Spring configuration and the types bound through
 `@ConfigurationProperties`. `StorageProperties` binds `sllapp.storage.directory`.
 Session, moderation and web defaults are declared in `SessionProperties`,
 `ModerationProperties`, `SessionWebSocketProperties` and `WebProperties`.
+Creation expiry defaults to `5m`, game duration to `60s` and the finished resume
+window to `5m`. All three durations must be positive.
 See the [configuration table](api.md#websocket-configuration).
 The session registry is local to one application instance and is separate from
 SQLite result storage.
@@ -317,6 +431,11 @@ row limit as a bound SQL parameter. A limit below 1 causes
 
 ## Test coverage and CI
 
+The game tests use fixed instants and controlled word picks without a Spring
+context. They check the bundled catalog, word pool refill, scoring, position
+progression, expiry and repeated letters. Run them from `backend/` with
+`sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
+
 The prediction tests use `MockRestServiceServer` for request and response
 validation. A local HTTP server checks the wire byte count, connection reuse,
 asynchronous execution, executor saturation and timeouts in both the header
@@ -327,6 +446,10 @@ The WebSocket tests cover creation, nickname validation, resuming, concurrent
 ownership changes, delayed close callbacks, expiry with a controlled clock,
 sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
 UTF-8 size boundaries, fragmented text and oversized binary messages.
+`SessionGameTest` uses a deterministic picker and a controlled clock to check
+start, completion, state-specific samples, scheduled finish, resume, ranking
+and persistence retries after expiry. `SessionOwnershipTest` checks concurrent
+start and persistence after a socket send failure.
 `BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
 duplicates, NFKC normalization, the bundled list, and startup errors for missing,
 unreadable, malformed, empty or invalid files and directories. Other session

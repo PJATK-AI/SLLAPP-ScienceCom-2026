@@ -1,6 +1,8 @@
 package pl.pjatk.ai.sllapp.web.websocket;
 
 import java.io.IOException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -17,18 +19,20 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-class SessionConnectionRegistry {
+public class SessionConnectionRegistry {
     static final CloseStatus SESSION_EXPIRED = CloseStatus.POLICY_VIOLATION.withReason("Session expired");
 
     private static final Logger log = LoggerFactory.getLogger(SessionConnectionRegistry.class);
     private final SessionService sessions;
     private final ObjectMapper mapper;
+    private final Clock clock;
     private final ConcurrentHashMap<String, SessionConnection> connections = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SessionConnection> owners = new ConcurrentHashMap<>();
 
-    SessionConnectionRegistry(SessionService sessions, ObjectMapper mapper) {
+    SessionConnectionRegistry(SessionService sessions, ObjectMapper mapper, Clock clock) {
         this.sessions = sessions;
         this.mapper = mapper;
+        this.clock = clock;
     }
 
     void register(WebSocketSession socket) {
@@ -64,24 +68,57 @@ class SessionConnectionRegistry {
 
     // Callers that act on ownership hold the game session monitor until the operation finishes.
     boolean isOwner(GameSession game, SessionConnection connection) {
-        return owners.get(game.sessionId()) == connection;
+        return owners.get(game.sessionId()) == connection && connections.get(connection.socket.getId()) == connection;
+    }
+
+    boolean checkActive(GameSession game, SessionConnection connection, Instant now) {
+        if (!isOwner(game, connection)) return false;
+        if (finishIfDue(game, now) && !isOwner(game, connection)) return false;
+        if (sessions.isActive(game, now)) return true;
+        closeSafely(connection, SESSION_EXPIRED);
+        return false;
     }
 
     void bind(SessionConnection connection, GameSession game) throws IOException {
         SessionConnection previous = null;
         try {
             synchronized (game) {
-                if (!sessions.isActive(game)) {
+                var now = clock.instant();
+                finishIfDue(game, now);
+                if (!sessions.isActive(game, now)) {
                     connection.socket.close(SESSION_EXPIRED);
                     return;
                 }
                 connection.game = game;
                 if (connections.get(connection.socket.getId()) != connection || !connection.socket.isOpen()) return;
                 previous = owners.put(game.sessionId(), connection);
-                connection.send(GameStateMessage.from(game));
+                connection.send(GameStateMessage.from(game, now));
             }
         } finally {
             if (previous != null) closeSafely(previous, CloseStatus.NORMAL.withReason("Connection replaced"));
+        }
+    }
+
+    /** Applies a server-confirmed completion to the session's current position. */
+    public boolean completePosition(GameSession game, long positionId) {
+        synchronized (game) {
+            if (!sessions.contains(game)) return false;
+            var now = clock.instant();
+            finishIfDue(game, now);
+            if (!game.completePosition(positionId, now)) return false;
+            publishState(game, now);
+            return true;
+        }
+    }
+
+    private void publishState(GameSession game, Instant now) {
+        var connection = owners.get(game.sessionId());
+        if (connection == null || !isOwner(game, connection)) return;
+        try {
+            connection.send(GameStateMessage.from(game, now));
+        } catch (IOException | RuntimeException exception) {
+            log.warn("Could not send game state to WebSocket {}", connection.socket.getId(), exception);
+            closeAfterTransportError(connection.socket.getId());
         }
     }
 
@@ -89,28 +126,36 @@ class SessionConnectionRegistry {
         var game = connection.game;
         if (game == null) return true;
         synchronized (game) {
-            if (!isOwner(game, connection)) return false;
-            if (sessions.isActive(game)) return true;
-            closeSafely(connection, SESSION_EXPIRED);
-            return false;
+            return checkActive(game, connection, clock.instant());
         }
     }
 
     @Scheduled(fixedDelay = 1000)
     void expireSessions() {
-        for (var game : sessions.removeExpired()) {
+        for (var game : sessions.all()) {
             SessionConnection connection;
             synchronized (game) {
+                var now = clock.instant();
+                if (!finishIfDue(game, now)) sessions.saveResult(game);
+                if (now.isBefore(game.expiresAt())) continue;
+                sessions.removeExpired(game, now);
                 connection = owners.remove(game.sessionId());
             }
             if (connection != null) closeSafely(connection, SESSION_EXPIRED);
         }
     }
 
+    private boolean finishIfDue(GameSession game, Instant now) {
+        if (!game.finishIfDue(now)) return false;
+        sessions.saveResult(game);
+        publishState(game, now);
+        return true;
+    }
+
     private void closeSafely(SessionConnection connection, CloseStatus status) {
         try {
             connection.socket.close(status);
-        } catch (IOException exception) {
+        } catch (IOException | RuntimeException exception) {
             log.warn("Could not close WebSocket {}", connection.socket.getId(), exception);
         }
     }
