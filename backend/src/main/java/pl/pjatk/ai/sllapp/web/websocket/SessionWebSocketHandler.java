@@ -2,6 +2,7 @@ package pl.pjatk.ai.sllapp.web.websocket;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.stereotype.Component;
@@ -15,6 +16,7 @@ import pl.pjatk.ai.sllapp.model.GameSession;
 import pl.pjatk.ai.sllapp.model.SelectedHand;
 import pl.pjatk.ai.sllapp.service.SessionService;
 import pl.pjatk.ai.sllapp.web.websocket.message.ErrorMessage;
+import pl.pjatk.ai.sllapp.web.websocket.message.GameStateMessage;
 import pl.pjatk.ai.sllapp.web.websocket.message.SampleAckMessage;
 import pl.pjatk.ai.sllapp.web.websocket.message.SampleMessage;
 import tools.jackson.core.JacksonException;
@@ -31,14 +33,16 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
     private final SessionService sessions;
     private final SampleMessageValidator samples;
     private final SessionConnectionRegistry connections;
+    private final Clock clock;
 
     SessionWebSocketHandler(ObjectMapper mapper, SessionWebSocketProperties properties, SessionService sessions,
-                            SampleMessageValidator samples, SessionConnectionRegistry connections) {
+                            SampleMessageValidator samples, SessionConnectionRegistry connections, Clock clock) {
         this.reader = mapper.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.properties = properties;
         this.sessions = sessions;
         this.samples = samples;
         this.connections = connections;
+        this.clock = clock;
     }
 
     @Override
@@ -78,8 +82,26 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
         switch (input.path("type").asString()) {
             case "create_session" -> create(connection, input);
             case "resume_session" -> resume(connection, input);
+            case "start_game" -> start(connection);
             case "hand_sample", "no_hand" -> sample(connection, input);
             default -> error(session, "UNKNOWN_TYPE", "Unknown message type.");
+        }
+    }
+
+    private void start(SessionConnection connection) throws IOException {
+        var game = connection.game;
+        if (game == null) {
+            connection.send(ErrorMessage.of("SESSION_REQUIRED", "Create or resume a session first."));
+            return;
+        }
+        synchronized (game) {
+            var now = clock.instant();
+            if (!connections.checkActive(game, connection, now)) return;
+            if (!sessions.start(game, now)) {
+                connection.send(ErrorMessage.of("GAME_ALREADY_STARTED", "This session already started a game."));
+                return;
+            }
+            connection.send(GameStateMessage.from(game, now));
         }
     }
 
@@ -90,14 +112,17 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
             return;
         }
         synchronized (game) {
-            if (!connections.isOwner(game, connection)) return;
-            if (!sessions.isActive(game)) {
-                connection.socket.close(SessionConnectionRegistry.SESSION_EXPIRED);
+            var now = clock.instant();
+            if (!connections.checkActive(game, connection, now)) return;
+            if (game.result() != null) {
+                connection.send(ErrorMessage.of("GAME_FINISHED", "This game has finished."));
                 return;
             }
+            var state = game.state(now);
             SampleMessage sample;
             try {
-                sample = samples.validate(input);
+                Long activePositionId = state == null ? null : state.positionId();
+                sample = samples.validate(input, activePositionId);
             } catch (IllegalArgumentException exception) {
                 error(connection.socket, "INVALID_SAMPLE", exception.getMessage());
                 return;

@@ -11,8 +11,9 @@ See the [README](../README.md) for local setup and commands.
 
 The `pl.pjatk.ai.sllapp.game` package uses the JDK. A Java caller creates one
 `GameEngine` and one `WordPicker` per game. The caller provides timestamps and
-serializes operations on the engine. The current WebSocket session flow
-exposes the `CREATED` state documented in the [API reference](api.md#websocket-transport).
+serializes operations on the engine. WebSocket sessions start an engine on
+`start_game` and publish its position and score through `game_state`.
+See the [API reference](api.md#websocket-transport).
 
 ```java
 import java.time.Instant;
@@ -105,29 +106,35 @@ under `target/game-test-data`. See the
 handshake. `SessionWebSocketTest` checks the running server with JDK HTTP and
 WebSocket clients.
 
-`model.GameSession` is an immutable player session with UUID, nickname,
-selected hand and creation/expiry timestamps. `SessionService` holds sessions
-in memory and uses the injected UTC `Clock` (from `ClockConfiguration`) to check
-expiry. `NicknamePolicy` validates player names. It uses `BlockedWordList`, which reads the blocked-word
-file from `sllapp.moderation.blocked-words-location` once at startup.
+`model.GameSession` holds player metadata and the game lifecycle. `SessionService`
+keeps sessions in memory and validates player names through `NicknamePolicy`.
+`BlockedWordList` reads `sllapp.moderation.blocked-words-location` once at startup.
+On start, the session creates a `GameEngine` with `GameRules.defaults()` and its
+own picker. The production picker factory shares the bundled `WordCatalog`.
 
-`SessionWebSocketHandler` decodes messages and dispatches `create_session` and
-`resume_session`. `SessionConnectionRegistry` tracks the active socket for each game
-session, replaces it on reconnect and closes it on expiry. Replacement and
-sample acceptance use the same session lock. Closing an old socket cannot
-detach its replacement. `SessionConnection` serializes outbound sends through
+`SessionWebSocketHandler` dispatches `create_session`, `resume_session`,
+`start_game`, `hand_sample` and `no_hand`. `SessionConnectionRegistry` tracks
+the current socket for each session. The same session monitor serializes socket
+replacement, game operations and removal. Closing an old socket cannot detach
+its replacement. `SessionConnection` serializes outbound sends through
 `ConcurrentWebSocketSessionDecorator`.
 
-`SampleMessageValidator` validates `hand_sample` and `no_hand`. A `SampleMessage`
-retains the hand JSON, including additional fields. Each `SessionConnection`
-stores only the latest accepted sample and sequence number. Validation precedes
-sequence advancement; ownership and expiry are checked under the session lock.
-Diagnostic acknowledgements are controlled by `SessionWebSocketProperties`.
+`SampleMessageValidator` checks each sample against the session's current
+position before the connection advances its sequence. A `SampleMessage` retains
+the position ID and hand JSON, including additional fields. The latest accepted
+sample belongs to its connection. Diagnostic acknowledgements are controlled by
+`SessionWebSocketProperties`. Server callers use
+`SessionConnectionRegistry.completePosition` to apply a confirmed completion and
+publish the resulting state to the current socket.
 
-A task in `SessionConnectionRegistry` runs every second. It asks `SessionService` to
-remove expired sessions and closes their current sockets. Incoming messages also
-check the deadline. Tests inject a controllable clock to check exact expiry and
-ensure that sample traffic and reconnects do not extend the session lifetime.
+`ClockConfiguration` supplies the UTC `Clock` used for the creation expiry, game
+deadline and finished expiry. The registry checks the deadline under the session
+monitor on incoming messages, resume and position completion, and in a sweep
+every second. On finish, it freezes the score, attempts one SQLite insert and
+publishes `FINISHED` to the current socket. The result timestamp is the game
+deadline. The sweep retries pending writes, including for disconnected games
+and after public expiry. After expiry it closes any bound socket with code 1008
+and removes sessions once their results are stored.
 
 ```mermaid
 sequenceDiagram
@@ -135,24 +142,22 @@ sequenceDiagram
     participant WS as SessionWebSocketHandler
     participant Sessions as SessionService
     participant Connections as SessionConnectionRegistry
-    participant Validator as SampleMessageValidator
-    participant Connection as SessionConnection
     Client->>WS: create_session (nickname, selectedHand)
     WS->>Sessions: validate and store player session
     Sessions-->>WS: GameSession
     WS->>Connections: bind socket to session
     Connections-->>Client: game_state (CREATED, sessionId, positionId=null)
+    Client->>WS: start_game
+    WS->>Sessions: start game under the session monitor
+    WS-->>Client: game_state (RUNNING, current position)
     Client->>WS: hand_sample / no_hand
-    WS->>Connections: check connection ownership
-    WS->>Sessions: check expiry
-    WS->>Validator: validate sample fields
-    Validator-->>WS: SampleMessage
-    WS->>Connection: accept sample if sequence increases
-    Note over WS,Connection: Ownership, expiry, validation and acceptance use the same session lock
-    opt Diagnostic mode
-        WS->>Connection: send acknowledgement for accepted sample
-        Connection-->>Client: sample_ack
+    WS->>Connections: check ownership and reconcile the deadline
+    WS->>WS: validate position and accept a fresh sequence
+    opt Diagnostic mode and accepted sample
+        WS-->>Client: sample_ack
     end
+    Connections->>Sessions: save result when the game reaches its deadline
+    Connections-->>Client: game_state (FINISHED, final score) if connected
 ```
 
 ## Ranking HTTP API
@@ -274,6 +279,7 @@ backend/src/
     │           ├── SampleFixtures.java
     │           ├── SampleMessageValidatorTest.java
     │           ├── SessionExpiryTest.java
+    │           ├── SessionGameTest.java
     │           ├── SessionOwnershipTest.java
     │           ├── SessionSamplesTest.java
     │           ├── SessionWebSocketTest.java
@@ -317,6 +323,8 @@ The `config` package contains Spring configuration and the types bound through
 `@ConfigurationProperties`. `StorageProperties` binds `sllapp.storage.directory`.
 Session, moderation and web defaults are declared in `SessionProperties`,
 `ModerationProperties`, `SessionWebSocketProperties` and `WebProperties`.
+Creation expiry defaults to `5m`, game duration to `60s` and the finished resume
+window to `5m`. All three durations must be positive.
 See the [configuration table](api.md#websocket-configuration).
 The session registry is local to one application instance and is separate from
 SQLite result storage.
@@ -373,6 +381,10 @@ The WebSocket tests cover creation, nickname validation, resuming, concurrent
 ownership changes, delayed close callbacks, expiry with a controlled clock,
 sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
 UTF-8 size boundaries, fragmented text and oversized binary messages.
+`SessionGameTest` uses a deterministic picker and a controlled clock to check
+start, completion, state-specific samples, scheduled finish, resume, ranking
+and persistence retries after expiry. `SessionOwnershipTest` checks concurrent
+start and persistence after a socket send failure.
 `BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
 duplicates, NFKC normalization, the bundled list, and startup errors for missing,
 unreadable, malformed, empty or invalid files and directories. Other session

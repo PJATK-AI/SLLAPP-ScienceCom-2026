@@ -9,7 +9,7 @@ import tools.jackson.databind.JsonNode;
 class SampleMessageValidator {
     private static final BigInteger MAX_SEQ = BigInteger.valueOf(9_007_199_254_740_991L);
 
-    SampleMessage validate(JsonNode input) {
+    SampleMessage validate(JsonNode input, Long activePositionId) {
         String type = input.path("type").asString();
         if (!"hand_sample".equals(type) && !"no_hand".equals(type)) {
             throw new IllegalArgumentException("Expected hand_sample or no_hand.");
@@ -19,10 +19,8 @@ class SampleMessageValidator {
                 || seq.bigIntegerValue().compareTo(MAX_SEQ) > 0) {
             throw new IllegalArgumentException("seq must be an integer between 0 and 9007199254740991.");
         }
-        if (!input.has("positionId") || !input.path("positionId").isNull()) {
-            throw new IllegalArgumentException("positionId must be null in CREATED state.");
-        }
-        if ("no_hand".equals(type)) return new SampleMessage(type, seq.longValue(), null);
+        validatePosition(input.path("positionId"), activePositionId);
+        if ("no_hand".equals(type)) return new SampleMessage(type, seq.longValue(), activePositionId, null);
 
         var hand = input.path("hand");
         var handedness = hand.path("handedness");
@@ -42,6 +40,16 @@ class SampleMessageValidator {
                 }
             }
         }
-        return new SampleMessage(type, seq.longValue(), hand.deepCopy());
+        return new SampleMessage(type, seq.longValue(), activePositionId, hand.deepCopy());
+    }
+
+    private void validatePosition(JsonNode position, Long activePositionId) {
+        if (activePositionId == null) {
+            if (!position.isNull()) {
+                throw new IllegalArgumentException("positionId must be null in CREATED state.");
+            }
+        } else if (!position.isIntegralNumber() || !position.bigIntegerValue().equals(BigInteger.valueOf(activePositionId))) {
+            throw new IllegalArgumentException("positionId must match the active position in RUNNING state.");
+        }
     }
 }

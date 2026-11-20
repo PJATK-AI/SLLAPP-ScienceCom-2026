@@ -227,10 +227,17 @@ socket.onopen = () => socket.send(JSON.stringify({
 }));
 ```
 
-The server responds with `game_state`, a `sessionId`, player data and
-`positionId: null`. The connection accepts `hand_sample` and `no_hand` messages.
-Sessions expire five minutes after creation by default; their data lives in
-memory. A new socket can resume a session and replace its previous connection.
+The server responds with `game_state` in `CREATED`, including a `sessionId`,
+player data and `positionId: null` for the camera check. After that response,
+send `socket.send(JSON.stringify({ type: 'start_game' }))` to start a 60-second
+round. The server returns `RUNNING` with the current letter, position, remaining
+time and score. Copy the current `positionId` into `hand_sample` and `no_hand`.
+
+The server sends `FINISHED` at the end of the round and saves the score to the
+ranking, including for disconnected players. By default, a never-started
+session expires five minutes after creation. After starting, a new socket can
+send `resume_session` with the `sessionId` while the game runs or for five
+minutes after the game deadline. A successful resume replaces the previous socket.
 See the [WebSocket reference](docs/api.md#websocket-transport) for complete
 messages, reconnect behavior, origin settings and optional acknowledgements.
 
@@ -278,9 +285,9 @@ From `backend/`:
 ```
 
 On Linux or macOS, use `sh mvnw -B verify`. The tests cover the game catalog,
-scoring and progression, WebSocket sessions and sample validation, SQLite
+scoring and progression, timed WebSocket games and sample validation, SQLite
 persistence and ranking HTTP responses. Integration tests use random server
-ports and temporary databases.
+ports, temporary databases and a controlled clock for game deadlines.
 
 To run only the standalone game tests from `backend/`, use
 `sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
