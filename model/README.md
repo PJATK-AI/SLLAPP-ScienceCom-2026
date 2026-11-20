@@ -388,12 +388,15 @@ Exit code `0` = valid, `1` = problems found (each one listed with its file name)
 
 ### Run the tests
 
-```
+From the repository root, with a Python 3.13 virtual environment active, run:
+
+```sh
+python -m pip install -r model/requirements.txt
 python -m unittest discover -s model/tests -t . -v
 ```
 
-The tests use small synthetic datasets in a temporary folder. One extra test runs against
-the real dataset and is skipped when it is not present.
+The training, prediction and HTTP service tests use synthetic data. Tests that
+require the SPAS dataset are skipped when it is absent.
 
 ## What is validated
 

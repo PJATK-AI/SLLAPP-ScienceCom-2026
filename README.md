@@ -290,7 +290,7 @@ saved results.
 | `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
 | `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
 | `docs/` | API reference, backend architecture and project workflow |
-| `.github/workflows/ci.yml` | Backend and frontend checks |
+| `.github/workflows/ci.yml` | Backend, frontend and Python model checks |
 
 ## Development and testing
 
@@ -328,8 +328,22 @@ Turborepo builds dependencies first and caches build output. In development,
 Vite and TypeScript resolve library exports to `src/` through the `development`
 condition; production builds use compiled `dist/` output.
 
-The [CI workflow](.github/workflows/ci.yml) runs backend verification and frontend
-formatting, build, type checks and tests on pull requests and pushes to `master`.
+### Python model checks
+
+From the repository root, with a Python 3.13 virtual environment active, run:
+
+```sh
+python -m pip install -r model/requirements.txt
+python -m unittest discover -s model/tests -t . -v
+```
+
+The training, prediction and HTTP service tests use synthetic data. Tests
+that require the SPAS dataset are skipped when it is absent.
+[Model testing guide](model/README.md#run-the-tests)
+
+The [CI workflow](.github/workflows/ci.yml) runs the `backend`, `frontend` and
+`model` jobs on pull requests and pushes to `master`. The `model` job runs
+the Python test suite on Ubuntu with Python 3.13.
 
 ## Documentation and contributing
 
