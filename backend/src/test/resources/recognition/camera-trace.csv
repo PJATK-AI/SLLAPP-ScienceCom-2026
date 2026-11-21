@@ -1,0 +1,25 @@
+# Event times from Arman Laliwala's recorded camera demo, starting at 3.1 seconds.
+# https://github.com/Armanlaliwala/Real-Time-Hand-Gesture-Recognition-Using-MediaPipe-OpenCV/blob/main/gesture_recognition_output.mp4
+# Video SHA-256 bca5019c38d1eb0a441a68415ca14547d7ce35488810d0b3a588cb174c96daef
+# MediaPipe Hand Landmarker 1.2.3, VIDEO mode, two hands, sampled at 10 Hz.
+# A missing tracked right hand becomes no_hand. The fixture keeps event times and presence only.
+# Three events at 400, 500 and 600 ms are omitted to simulate a pause in delivery.
+elapsedMs,event,expectedPosition,expectedRequiresRelease
+0,hand_sample,1,false
+100,no_hand,1,false
+200,hand_sample,1,false
+300,hand_sample,1,false
+700,hand_sample,1,false
+800,hand_sample,1,false
+900,hand_sample,2,true
+1000,hand_sample,2,true
+1100,hand_sample,2,true
+1200,hand_sample,2,true
+1300,hand_sample,2,true
+1400,hand_sample,2,true
+1500,hand_sample,2,true
+1600,hand_sample,2,true
+1700,hand_sample,2,true
+1800,hand_sample,2,true
+1900,no_hand,2,true
+2000,no_hand,2,false

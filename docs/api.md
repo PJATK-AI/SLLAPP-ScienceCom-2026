@@ -91,9 +91,9 @@ The server starts one game and returns its current position.
 ```
 
 `letterIndex` is zero-based. `expectedLetter` is a one-character string.
-`requiresRelease` is true when the active letter repeats the preceding
-completed letter, including across words. The server sends a fresh `RUNNING`
-state after each accepted server-side position completion and on resume.
+`requiresRelease` is set when the active letter repeats the preceding completed
+letter, including across words. The server sends a fresh `RUNNING` state after
+each completion, when the hand is released and on resume.
 `remainingMs` is the remaining whole milliseconds at the time of that snapshot.
 The server uses the default [game rules](backend-architecture.md#standalone-game-engine).
 
@@ -163,13 +163,14 @@ Both sample types require a bound session and an integer `seq` from 0 to
 Sequence numbers increase across both types on the same connection. Gaps are
 allowed, and reconnecting starts a new sequence. Valid messages with an old or
 duplicate sequence are ignored. Invalid messages do not consume a sequence
-number. Samples alone leave the position and score unchanged.
+number. In `RUNNING`, fresh samples are processed by the recognition rules below.
 
 `hand_sample` contains a `hand` object with `handedness: LEFT` or `RIGHT` and
 exactly 21 `landmarks`. Every point has finite numeric `x`, `y`, `z`; coordinates
 are not restricted to 0–1. Extra hand fields, including nested fields, are
-retained in the latest accepted sample. Either handedness is accepted regardless
-of `selectedHand`. Tracker values `Left`/`Right` must be mapped to `LEFT`/`RIGHT`.
+retained and passed to the prediction service for eligible samples. Either
+handedness passes transport validation. The game uses the session's
+`selectedHand`. Tracker values `Left`/`Right` must be mapped to `LEFT`/`RIGHT`.
 
 `score` and `coordinateSpace` are optional in the WebSocket sample. The
 [Python prediction API](../model/README.md#post-predict) requires
@@ -237,7 +238,35 @@ fresh valid sample receives an acknowledgement:
 {"type":"sample_ack","seq":1}
 ```
 
-The acknowledgement confirms validation and acceptance of a sample.
+The acknowledgement confirms transport acceptance, including when recognition
+skips the sample.
+
+### Letter recognition
+
+During `RUNNING`, the server sends fresh samples of the selected hand for the
+active `positionId` to the prediction service. Each session has one prediction
+in flight. Additional samples of the selected hand are skipped while that call
+is outstanding, with no queue. `no_hand` takes effect immediately and
+invalidates an outstanding result. A sample of the other hand also invalidates
+it. The slot stays occupied until the call ends, even if the socket is replaced.
+
+A result can count while the round, socket and position are current and the
+time since the server accepted the sample is below `sllapp.ai.timeout`. The
+prediction must match the expected letter and reach the minimum confidence.
+A different letter, low confidence, a prediction failure, an exceeded call
+budget, `no_hand` or a sample of the other hand resets the streak. If the time
+between two counted samples exceeds the maximum gap, the current qualifying
+sample starts a new streak. The server measures the gap between sample
+acceptance times. After the required streak, it awards points, advances the
+position and sends `game_state`.
+
+While `requiresRelease` is true, consecutive `no_hand` messages for the active
+position count toward release. Send `no_hand` whenever the selected hand is
+absent, including when only the other hand is visible. Any hand sample resets
+the release count. At the configured count, the server sends `game_state` with
+`requiresRelease: false` and the same position and score. Subsequent samples
+can start a new prediction streak. On resume, the release flag is preserved
+and both the streak and the partial release count start at zero.
 
 ### Errors and connection closure
 
@@ -275,6 +304,11 @@ open so the client can correct its request:
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
 | `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
 | `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
+| `sllapp.game.recognition.min-confidence` | `0.80` | Inclusive prediction confidence threshold, from 0 to 1 |
+| `sllapp.game.recognition.required-predictions` | `3` | Consecutive qualifying predictions required to complete a position. Must be positive. |
+| `sllapp.game.recognition.max-sample-gap` | `350ms` | Inclusive maximum gap between acceptance times of consecutive counted samples. Must be positive. |
+| `sllapp.game.recognition.release-no-hand-count` | `2` | Consecutive `no_hand` events required to unlock a repeated letter. Must be positive. |
+| `sllapp.ai.timeout` | `250ms` | HTTP timeout and exclusive time budget from sample acceptance to applying a prediction. Must be positive. |
 
 Use Spring Boot command-line properties or environment variables such as
 `SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true`.

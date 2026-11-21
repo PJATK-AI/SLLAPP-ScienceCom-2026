@@ -3,7 +3,7 @@
 <div align="center">
   <h1>SLLAPP · ScienceCom 2026</h1>
   <p>Sign Language Learning Application</p>
-  <p>A Java game engine, WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand tracking.</p>
+  <p>A Java game engine, AI letter recognition, WebSocket sessions, a ranking REST API, SQLite result storage and Vue hand tracking.</p>
   <p>
     <img src="https://img.shields.io/badge/Java-21-ED8B00?style=flat-square" alt="Java 21">
     <img src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square" alt="Vue 3">
@@ -65,6 +65,11 @@ python -m model.service
 Check [`/health`](http://127.0.0.1:8000/health). For an artifact in a different
 directory, pass `--model path/to/model.joblib`. To see predictions in the
 browser, [enable AI in the recognition panel](docs/local-development.md#run-recognition-with-the-python-service).
+
+During a round, the backend completes the active letter after three matching
+predictions with confidence at least `0.80` and no more than `350ms` between
+their accepted samples by default. Two consecutive `no_hand` messages unlock
+a repeated letter. [Recognition rules and settings](docs/api.md#letter-recognition)
 
 ## Local tools
 
