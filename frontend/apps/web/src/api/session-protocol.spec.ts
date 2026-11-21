@@ -98,4 +98,23 @@ describe('session protocol', () => {
             ).type,
         ).toBe('error');
     });
+    it('validates a prediction result independently of the game state', () => {
+        const prediction = {
+            type: 'prediction_result',
+            seq: 0,
+            positionId: 1,
+            elapsedMs: 15,
+            letter: 'L',
+            confidence: 0.92,
+            httpStatus: 200,
+            disposition: 'PROCESSED',
+        };
+        expect(parseSessionMessage(JSON.stringify(prediction))).toEqual(prediction);
+        expect(() =>
+            parseSessionMessage(JSON.stringify({ ...prediction, confidence: 2 })),
+        ).toThrow();
+        expect(() =>
+            parseSessionMessage(JSON.stringify({ ...prediction, failure: 'DISABLED' })),
+        ).toThrow();
+    });
 });

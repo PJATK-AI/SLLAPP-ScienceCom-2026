@@ -268,6 +268,34 @@ the release count. At the configured count, the server sends `game_state` with
 can start a new prediction streak. On resume, the release flag is preserved
 and both the streak and the partial release count start at zero.
 
+### Round prediction diagnostics
+
+When `sllapp.websocket.diagnostic-mode` is enabled, a client can connect to
+`/ws?diagnostics=1` to receive best-effort `prediction_result` messages
+for its own round. The message describes the same AI attempt the game used.
+It identifies the accepted sample by `seq` and `positionId`:
+
+```json
+{
+  "type": "prediction_result",
+  "seq": 12,
+  "positionId": 3,
+  "elapsedMs": 9,
+  "disposition": "POSITION_COMPLETED",
+  "letter": "A",
+  "confidence": 0.96,
+  "httpStatus": 200
+}
+```
+
+`elapsedMs` runs from sample acceptance until the prediction resolves. A
+failure has a `failure` category in place of `letter` and `confidence` and
+includes `httpStatus` when available. `PROCESSED` means the result reached
+the recognition rules. `POSITION_COMPLETED` means it advanced the round.
+`TOO_LATE` and `IGNORED` describe results that the game discarded. A busy
+diagnostics sender can skip a report. Use `game_state` for the actual round
+progress and `sample_ack` for transport acceptance.
+
 ### Errors and connection closure
 
 Error messages contain `type`, `code` and `message`. They keep the connection
@@ -302,7 +330,7 @@ open so the client can correct its request:
 | `sllapp.moderation.blocked-words-location` | `classpath:moderation/blocked-words.txt` | Blocked-word file; must start with `classpath:` or `file:` |
 | `sllapp.websocket.max-message-bytes` | `65536` | Application limit for text, in UTF-8 bytes |
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
-| `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
+| `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples and allow opted-in round prediction reports |
 | `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
 | `sllapp.game.recognition.min-confidence` | `0.80` | Inclusive prediction confidence threshold, from 0 to 1 |
 | `sllapp.game.recognition.required-predictions` | `3` | Consecutive qualifying predictions required to complete a position. Must be positive. |

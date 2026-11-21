@@ -53,12 +53,14 @@ const hand = {
     landmarks: Array.from({ length: 21 }, () => ({ x: 1, y: 2, z: 3 })),
 };
 const scopes: ReturnType<typeof effectScope>[] = [];
-function setup() {
+function setup(diagnostics = false) {
     vi.stubGlobal('WebSocket', Socket);
     vi.useFakeTimers();
     const scope = effectScope();
     scopes.push(scope);
-    const client = scope.run(() => useGameSession({ url: 'ws://localhost/ws', timeoutMs: 100 }))!;
+    const client = scope.run(() =>
+        useGameSession({ url: 'ws://localhost/ws', timeoutMs: 100, diagnostics }),
+    )!;
     client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
     return { client, socket: Socket.all.at(-1)!, scope };
 }
@@ -249,4 +251,66 @@ it('rejects invalid URLs before constructing a socket', () => {
     expect(client.error.value?.source).toBe('configuration');
     expect(Socket.all).toHaveLength(0);
     client.dispose();
+});
+
+it('correlates bounded diagnostics with the socket without changing the round', () => {
+    const { client, socket } = setup(true);
+    expect(socket.url).toBe('ws://localhost/ws?diagnostics=1');
+    socket.open();
+    socket.message(state);
+    client.startGame();
+    socket.message(running);
+    for (let seq = 0; seq < 160; seq++) client.sendHandSample(hand);
+    const prediction = {
+        type: 'prediction_result',
+        seq: 159,
+        positionId: 1,
+        elapsedMs: 7,
+        letter: 'L',
+        confidence: 0.975,
+        httpStatus: 200,
+        disposition: 'PROCESSED',
+    };
+    socket.message(prediction);
+    expect(client.lastPrediction.value).toEqual(prediction);
+    expect(client.gameState.value).toEqual(running);
+    expect(client.diagnosticEvents.value).toHaveLength(150);
+    expect(client.diagnosticEvents.value.at(-1)).toMatchObject({
+        connection: 1,
+        direction: 'receive',
+        label: 'prediction_result · seq 159',
+    });
+    socket.end();
+    client.reconnect();
+    const resumed = Socket.all.at(-1)!;
+    resumed.open();
+    resumed.message(running);
+    socket.message(prediction);
+    expect(client.lastPrediction.value).toBeNull();
+    expect(client.diagnosticEvents.value.at(-1)).toMatchObject({
+        connection: 2,
+        direction: 'receive',
+        label: 'game_state · RUNNING',
+    });
+    client.resetSession();
+    expect(client.diagnosticEvents.value).toEqual([]);
+});
+
+it('keeps prediction telemetry out of the normal client', () => {
+    const { client, socket } = setup();
+    expect(socket.url).toBe('ws://localhost/ws');
+    socket.open();
+    socket.message(state);
+    socket.message(running);
+    socket.message({
+        type: 'prediction_result',
+        seq: 0,
+        positionId: 1,
+        elapsedMs: 2,
+        failure: 'DISABLED',
+        disposition: 'PROCESSED',
+    });
+    expect(client.lastPrediction.value).toBeNull();
+    expect(client.diagnosticEvents.value).toEqual([]);
+    expect(client.gameState.value).toEqual(running);
 });

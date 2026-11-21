@@ -30,6 +30,17 @@ Use the regular backend with [prediction enabled](local-development.md#enable-pr
 to score gestures. The default sample rate is 10 Hz. The client skips intermediate
 frames and frames produced while the socket has buffered data.
 
+## Round diagnostics
+
+Run `pnpm dev:diagnostics` from `frontend/` and enable WebSocket diagnostics
+on the regular backend. Open **Diagnostyka** under the game to see the
+latest sample, ACK, prediction, confidence, HTTP status and time. The
+150-event history shows sent and received WebSocket messages. Match a
+prediction to a sample by connection number, `seq` and `positionId`. With
+the camera off before the round, the two sample buttons test transport.
+[Start the diagnostic mode](local-development.md#vue-round-diagnostics) ·
+[Prediction message](api.md#round-prediction-diagnostics)
+
 ## Configuration
 
 Vite reads environment variables from `frontend/apps/web/.env.local`.
@@ -55,7 +66,7 @@ in `model/artifacts/model.joblib` runs in the Python prediction service.
 
 ## Session client
 
-`useGameSession({ url, timeoutMs })` owns one WebSocket connection. By default
+`useGameSession({ url, timeoutMs, diagnostics })` owns one WebSocket connection. By default
 it reads `VITE_WS_URL` and allows 10 seconds each for opening the connection and
 receiving confirmation of a session or a round start. It exposes connection
 status, readiness, the latest validated state and errors.

@@ -74,6 +74,10 @@ a repeated letter. [Recognition rules and settings](docs/api.md#letter-recogniti
 
 ## Local tools
 
+For the Vue game with live WebSocket and prediction details, use
+`pnpm dev:diagnostics` from `frontend/` with
+[backend diagnostics enabled](docs/local-development.md#vue-round-diagnostics).
+
 Run the panel commands from `backend/`. On Windows, use `.\mvnw.cmd` in place
 of `sh mvnw`.
 

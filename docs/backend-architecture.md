@@ -200,7 +200,8 @@ the response body. Prediction requests have no application-level retries.
 The client sends the `hand` object unchanged to `POST /predict` as UTF-8 JSON with
 an explicit byte-count `Content-Length`. The Python service requires
 `coordinateSpace: "MEDIAPIPE_IMAGE"`, physical `handedness` and 21 image landmarks.
-The recognition diagnostics panel supplies the coordinate space on its camera samples.
+The game and the recognition diagnostics panel supply the coordinate space on
+their camera samples.
 The result is a prediction only for HTTP 200 with a supported uppercase letter
 and numeric confidence from 0 to 1, inclusive. During a game the session
 applies the [recognition rules](api.md#letter-recognition) to the result.
@@ -239,6 +240,13 @@ check logs a warning and the application continues to run. See the
 [local AI startup](local-development.md#run-recognition-with-the-python-service).
 
 ### Camera recognition diagnostics
+
+The regular game WebSocket can publish a
+[`prediction_result`](api.md#round-prediction-diagnostics) to a connection
+that opts in while backend diagnostics are enabled. It reports the outcome of
+the round's existing prediction attempt after the recognition rules run. A
+separate sender with zero queue capacity drops reports while busy, keeping
+diagnostic sends outside the game monitor.
 
 The local `recognition-test` profile uses the test classpath and binds to
 `127.0.0.1:8082` by default. The `recognition-ai` Maven shortcut activates

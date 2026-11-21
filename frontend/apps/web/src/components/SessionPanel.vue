@@ -2,34 +2,29 @@
 import { computed, ref, watch } from 'vue';
 import { useGameSession } from '@/composables/game-session';
 import type { SelectedHand } from '@/models';
-import { createTestHand } from './session-test-hand';
 import CameraTrackingPanel from './CameraTrackingPanel.vue';
 import SignReference from './SignReference.vue';
 import RoundRanking from './RoundRanking.vue';
+import SessionDiagnostics from './SessionDiagnostics.vue';
 
 const diagnosticMode = import.meta.env.DEV && import.meta.env.MODE === 'diagnostics';
 const cameraActive = ref(false);
 const nickname = ref('');
 const selectedHand = ref<SelectedHand>('RIGHT');
-const feedback = ref('');
+const session = useGameSession({ diagnostics: diagnosticMode });
 const {
-    connectionStatus,
     pendingAction,
     isReady,
     gameState,
     error,
     lastClose,
-    lastSentSeq,
-    lastSentPayload,
-    lastSampleAck,
     createSession,
     startGame,
     reconnect,
-    disconnect,
     resetSession,
     sendHandSample,
     sendNoHand,
-} = useGameSession();
+} = session;
 
 const running = computed(() => (gameState.value?.status === 'RUNNING' ? gameState.value : null));
 const remainingSeconds = ref(0);
@@ -60,24 +55,6 @@ const gameError = computed(() => {
     if (error.value?.code === 'INVALID_SAMPLE' || error.value?.code === 'GAME_FINISHED') return '';
     return error.value ? 'Wystąpił problem z połączeniem. Spróbuj ponownie.' : '';
 });
-
-const sampleJson = computed(() =>
-    lastSentPayload.value === null
-        ? ''
-        : JSON.stringify(JSON.parse(lastSentPayload.value), null, 2),
-);
-function sample(hand: boolean) {
-    if (gameState.value?.status !== 'CREATED') return;
-    const sent = hand ? sendHandSample(createTestHand(gameState.value.selectedHand)) : sendNoHand();
-    feedback.value = sent
-        ? 'Próbka przekazana do wysłania.'
-        : 'Próbka pominięta — połączenie niegotowe lub bufor zajęty.';
-}
-
-function newSession() {
-    resetSession();
-    feedback.value = '';
-}
 </script>
 
 <template>
@@ -87,7 +64,7 @@ function newSession() {
             <p class="final-score">
                 <strong>{{ gameState.score }}</strong> pkt
             </p>
-            <button type="button" class="primary" @click="newSession">Nowa sesja</button>
+            <button type="button" class="primary" @click="resetSession">Nowa sesja</button>
         </div>
         <RoundRanking :key="gameState.sessionId" />
     </section>
@@ -183,50 +160,7 @@ function newSession() {
         </div>
     </section>
 
-    <details v-if="diagnosticMode" class="diagnostics card">
-        <summary>Diagnostyka</summary>
-        <p>Połączenie: {{ connectionStatus }}</p>
-        <p v-if="error">{{ error.code }}: {{ error.message }}</p>
-        <p v-if="lastClose">Zamknięcie: {{ lastClose.code }} {{ lastClose.reason }}</p>
-        <dl>
-            <dt>ID sesji</dt>
-            <dd>{{ gameState?.sessionId ?? '—' }}</dd>
-            <dt>Ostatni wysłany seq</dt>
-            <dd data-testid="sent-seq">{{ lastSentSeq ?? '—' }}</dd>
-            <dt>Ostatni sample_ack</dt>
-            <dd data-testid="ack-seq">{{ lastSampleAck ?? '—' }}</dd>
-        </dl>
-        <button
-            :disabled="connectionStatus !== 'open' && connectionStatus !== 'connecting'"
-            @click="disconnect"
-        >
-            Rozłącz
-        </button>
-        <button
-            :disabled="
-                !isReady ||
-                cameraActive ||
-                gameState?.status !== 'CREATED' ||
-                pendingAction !== null
-            "
-            @click="sample(true)"
-        >
-            Wyślij testową dłoń
-        </button>
-        <button
-            :disabled="
-                !isReady ||
-                cameraActive ||
-                gameState?.status !== 'CREATED' ||
-                pendingAction !== null
-            "
-            @click="sample(false)"
-        >
-            Wyślij brak dłoni
-        </button>
-        <p aria-live="polite">{{ feedback }}</p>
-        <pre v-if="sampleJson" tabindex="0">{{ sampleJson }}</pre>
-    </details>
+    <SessionDiagnostics v-if="diagnosticMode" :session="session" :camera-active="cameraActive" />
 </template>
 
 <style scoped>
@@ -349,25 +283,6 @@ label {
 }
 .final-score strong {
     font-size: clamp(2.5rem, 8vw, 4rem);
-}
-.diagnostics {
-    margin-top: 1rem;
-    overflow-wrap: anywhere;
-}
-.diagnostics button {
-    margin-right: 0.5rem;
-}
-summary {
-    cursor: pointer;
-    font-weight: 650;
-}
-pre {
-    max-height: 16rem;
-    overflow: auto;
-    padding: 0.75rem;
-    background: #132c2b;
-    color: #f5fbfa;
-    border-radius: 0.5rem;
 }
 @media (min-width: 48rem) {
     .play-area.has-reference {

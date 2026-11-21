@@ -12,6 +12,7 @@
         "prepare:camera": "node scripts/prepare-camera.mjs",
         "build": "turbo run build",
         "dev": "turbo run dev",
+        "dev:diagnostics": "turbo run dev --filter=@sllapp/web -- --mode diagnostics",
         "test": "turbo run test",
         "typecheck": "turbo run typecheck",
         "format": "prettier --write .",

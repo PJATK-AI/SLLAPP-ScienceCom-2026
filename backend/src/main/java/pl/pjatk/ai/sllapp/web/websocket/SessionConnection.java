@@ -9,15 +9,21 @@ import pl.pjatk.ai.sllapp.web.websocket.message.SampleMessage;
 import tools.jackson.databind.ObjectMapper;
 
 final class SessionConnection {
-    final WebSocketSession socket;
+    final ConcurrentWebSocketSessionDecorator socket;
+    final boolean predictionDiagnostics;
     volatile GameSession game;
     private final ObjectMapper mapper;
     // Accessed while holding the game session monitor.
     private SampleMessage lastSample;
 
     SessionConnection(WebSocketSession socket, ObjectMapper mapper) {
+        this(socket, mapper, false);
+    }
+
+    SessionConnection(WebSocketSession socket, ObjectMapper mapper, boolean predictionDiagnostics) {
         this.socket = new ConcurrentWebSocketSessionDecorator(socket, 5000, 65536);
         this.mapper = mapper;
+        this.predictionDiagnostics = predictionDiagnostics;
     }
 
     boolean acceptSample(SampleMessage sample) {

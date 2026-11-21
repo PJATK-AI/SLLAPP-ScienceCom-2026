@@ -62,6 +62,29 @@ and **Complete letter** to exercise the timer, position and scoring using
 simulated completions. Each test round starts with a 60-second timer.
 [Game engine behavior](backend-architecture.md#standalone-game-engine)
 
+## Vue round diagnostics
+
+Start Python as described under [recognition with the Python service](#run-recognition-with-the-python-service).
+To play a round and inspect its predictions, set
+`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true` when starting the regular backend
+with prediction enabled. For example, from `backend/` on macOS or Linux:
+
+```sh
+SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 sh mvnw spring-boot:run
+```
+
+In PowerShell, set `$env:SLLAPP_WEBSOCKET_DIAGNOSTICMODE = 'true'` alongside
+the [regular backend settings](#enable-prediction-on-the-regular-backend).
+From `frontend/`, start the diagnostics variant of the app:
+
+```sh
+pnpm dev:diagnostics
+```
+
+Open [the game](http://127.0.0.1:5173) and expand **Diagnostyka**. This view
+uses the same camera and session as the game. For raw Java-to-Python HTTP
+bodies, use the separately launched [recognition panel](#recognition-diagnostics).
+
 ## Recognition diagnostics
 
 The diagnostic panel shows the selected hand and its skeleton, the exact JSON

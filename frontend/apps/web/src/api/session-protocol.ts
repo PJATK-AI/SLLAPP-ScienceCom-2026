@@ -48,6 +48,36 @@ export function parseSessionMessage(data: unknown): ServerMessage {
     if (v.type === 'error' && typeof v.code === 'string' && typeof v.message === 'string')
         return value as ServerMessage;
     if (v.type === 'sample_ack' && isUnsignedInteger(v.seq)) return value as ServerMessage;
+    if (
+        v.type === 'prediction_result' &&
+        isUnsignedInteger(v.seq) &&
+        isPositionId(v.positionId) &&
+        isUnsignedInteger(v.elapsedMs) &&
+        (v.disposition === 'PROCESSED' ||
+            v.disposition === 'POSITION_COMPLETED' ||
+            v.disposition === 'TOO_LATE' ||
+            v.disposition === 'IGNORED') &&
+        (v.httpStatus === undefined ||
+            (isUnsignedInteger(v.httpStatus) && v.httpStatus >= 100 && v.httpStatus <= 599))
+    ) {
+        if (
+            typeof v.failure === 'string' &&
+            v.failure &&
+            v.letter === undefined &&
+            v.confidence === undefined
+        )
+            return value as ServerMessage;
+        if (
+            v.failure === undefined &&
+            typeof v.letter === 'string' &&
+            v.letter.length === 1 &&
+            gameLetters.includes(v.letter) &&
+            typeof v.confidence === 'number' &&
+            v.confidence >= 0 &&
+            v.confidence <= 1
+        )
+            return value as ServerMessage;
+    }
     throw new Error('Invalid or unsupported server message.');
 }
 

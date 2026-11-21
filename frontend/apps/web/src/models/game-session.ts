@@ -35,12 +35,30 @@ export interface FinishedGameState extends GameStateBase {
 }
 export type GameState = CreatedGameState | RunningGameState | FinishedGameState;
 
+export type PredictionDiagnostic = {
+    type: 'prediction_result';
+    seq: number;
+    positionId: number;
+    elapsedMs: number;
+    disposition: 'PROCESSED' | 'POSITION_COMPLETED' | 'TOO_LATE' | 'IGNORED';
+    httpStatus?: number;
+} & ({ letter: string; confidence: number; failure?: never } | { failure: string });
+
 export type ServerMessage =
     | GameState
+    | PredictionDiagnostic
     | { type: 'error'; code: string; message: string }
     | { type: 'sample_ack'; seq: number };
 export interface SessionError {
     source: 'configuration' | 'transport' | 'protocol' | 'server';
     code: string;
     message: string;
+}
+
+export interface SessionDiagnosticEvent {
+    id: number;
+    connection: number;
+    direction: 'send' | 'receive' | 'connection';
+    label: string;
+    payload: string;
 }

@@ -115,6 +115,24 @@ it('creates a selected session, sends both test samples and displays acknowledge
     );
     expect(wrapper.text()).toContain('Próbka pominięta');
     expect(wrapper.get('[data-testid="sent-seq"]').text()).toBe('1');
+    const diagnostics = wrapper.get('details');
+    expect(diagnostics.attributes('open')).toBeUndefined();
+    (diagnostics.element as HTMLDetailsElement).open = true;
+    await diagnostics.trigger('toggle');
+    expect(diagnostics.text()).toContain('Odebrano · sample_ack · seq 1');
+    socket.message({
+        type: 'prediction_result',
+        seq: 0,
+        positionId: 1,
+        elapsedMs: 12,
+        letter: 'A',
+        confidence: 0.971,
+        httpStatus: 200,
+        disposition: 'POSITION_COMPLETED',
+    });
+    await nextTick();
+    expect(diagnostics.get('[aria-label="Predykcja AI"]').text()).toContain('Zaliczona litera');
+    expect(diagnostics.get('[aria-label="Predykcja AI"]').text()).toContain('0.971');
     await button('Rozłącz').trigger('click');
     expect(button('Wyślij testową dłoń').attributes('disabled')).toBeDefined();
     expect(button('Wznów sesję').attributes('disabled')).toBeUndefined();

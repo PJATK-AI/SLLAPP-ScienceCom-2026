@@ -1,6 +1,7 @@
 package pl.pjatk.ai.sllapp.web.websocket;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -310,17 +311,71 @@ class SessionRecognitionTest {
         assertState(socket, 2, 10, true);
     }
 
+    @Test
+    void reportsTheRealPredictionAndFailureForTheOptedInRound() throws Exception {
+        var socket = start(DEFAULTS, SelectedHand.RIGHT, true, true);
+        socket.hand(1);
+        advance(21);
+        lastCall().complete(A);
+        var prediction = socket.messages.getLast();
+        assertThat(prediction.path("type").asString()).isEqualTo("prediction_result");
+        assertThat(prediction.path("seq").asLong()).isZero();
+        assertThat(prediction.path("positionId").asLong()).isEqualTo(1);
+        assertThat(prediction.path("elapsedMs").asLong()).isEqualTo(21);
+        assertThat(prediction.path("letter").asString()).isEqualTo("A");
+        assertThat(prediction.path("confidence").asDouble()).isEqualTo(0.80);
+        assertThat(prediction.path("httpStatus").asInt()).isEqualTo(200);
+        assertThat(prediction.path("disposition").asString()).isEqualTo("PROCESSED");
+        predict(socket, new Failure(FailureKind.REJECTED_SAMPLE, 422, "Private inference detail"));
+        var failure = socket.messages.getLast();
+        assertThat(failure.path("seq").asLong()).isEqualTo(1);
+        assertThat(failure.path("httpStatus").asInt()).isEqualTo(422);
+        assertThat(failure.path("failure").asString()).isEqualTo("REJECTED_SAMPLE");
+        assertThat(failure.has("letter")).isFalse();
+        assertThat(failure.toString()).doesNotContain("Private inference detail");
+        predict(socket, A);
+        predict(socket, A);
+        predict(socket, A);
+        assertState(socket, 2, 10, true);
+        assertThat(socket.messages.getLast().path("disposition").asString()).isEqualTo("POSITION_COMPLETED");
+    }
+
+    @Test
+    void sendsNoPredictionReportToTheReplacedSocketOrItsSuccessor() throws Exception {
+        var first = start(DEFAULTS, SelectedHand.RIGHT, true, true);
+        first.hand(1);
+        var replacement = resume(true);
+        lastCall().complete(A);
+        assertThat(first.messages).noneMatch(message -> "prediction_result".equals(message.path("type").asString()));
+        assertThat(replacement.messages).hasSize(1);
+        predict(replacement, A);
+        assertThat(replacement.messages.getLast().path("type").asString()).isEqualTo("prediction_result");
+        assertState(replacement, 1, 0, false);
+    }
+
+    @Test
+    void requiresBothBackendDiagnosticsAndConnectionOptInForPredictionReports() throws Exception {
+        var socket = start(DEFAULTS, SelectedHand.RIGHT, false, true);
+        predict(socket, A);
+        assertThat(socket.messages).hasSize(2);
+    }
+
     private RecordingSocket start(RecognitionProperties rules) throws Exception {
         return start(rules, SelectedHand.LEFT);
     }
 
     private RecordingSocket start(RecognitionProperties rules, SelectedHand hand) throws Exception {
+        return start(rules, hand, true, false);
+    }
+
+    private RecordingSocket start(RecognitionProperties rules, SelectedHand hand, boolean diagnosticsEnabled,
+                                  boolean wantsPredictions) throws Exception {
         selectedHand = hand;
         connections = new SessionConnectionRegistry(sessions, mapper, clock, ai, rules, Duration.ofMillis(250),
                 sampleNanos::get);
-        handler = new SessionWebSocketHandler(mapper, new SessionWebSocketProperties(65536, 262144, true),
+        handler = new SessionWebSocketHandler(mapper, new SessionWebSocketProperties(65536, 262144, diagnosticsEnabled),
                 sessions, new SampleMessageValidator(), connections, clock);
-        var socket = new RecordingSocket();
+        var socket = new RecordingSocket(wantsPredictions);
         socket.send("{\"type\":\"create_session\",\"nickname\":\"Ola\",\"selectedHand\":\"" + hand + "\"}");
         id = UUID.fromString(socket.states().getFirst().path("sessionId").asString());
         var game = sessions.find(id).orElseThrow();
@@ -333,7 +388,11 @@ class SessionRecognitionTest {
     }
 
     private RecordingSocket resume() throws Exception {
-        var socket = new RecordingSocket();
+        return resume(false);
+    }
+
+    private RecordingSocket resume(boolean wantsPredictions) throws Exception {
+        var socket = new RecordingSocket(wantsPredictions);
         socket.send("{\"type\":\"resume_session\",\"sessionId\":\"" + id + "\"}");
         return socket;
     }
@@ -376,9 +435,10 @@ class SessionRecognitionTest {
         private final List<JsonNode> messages = new ArrayList<>();
         private long sequence;
 
-        private RecordingSocket() throws IOException {
+        private RecordingSocket(boolean wantsPredictions) throws IOException {
             when(socket.getId()).thenReturn(UUID.randomUUID().toString());
             when(socket.isOpen()).thenReturn(true);
+            when(socket.getUri()).thenReturn(URI.create("ws://localhost/ws" + (wantsPredictions ? "?diagnostics=1" : "")));
             doAnswer(invocation -> {
                 messages.add(mapper.readTree(((TextMessage) invocation.getArgument(0)).getPayload()));
                 return null;
