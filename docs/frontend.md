@@ -19,8 +19,8 @@ The source image is stored unchanged and licensed under
    disappear when that hand leaves the frame.
 3. Click **Rozpocznij rundę** once tracking starts. Sign the highlighted
    letter. The reference beside the camera displays a crop of the current
-   letter from the Polish fingerspelling chart. If the
-   same letter is required again, follow the prompt to take your hand out of frame.
+   letter from the Polish fingerspelling chart. When the same letter follows,
+   take your hand out of frame as prompted.
 4. If the connection drops, click **Wznów sesję**. The server returns the
    current position, time and score, or the final result after the deadline.
 5. When the round ends, the camera stops. The score stays visible while the
@@ -33,11 +33,13 @@ frames and frames produced while the socket has buffered data.
 ## Round diagnostics
 
 Run `pnpm dev:diagnostics` from `frontend/` and enable WebSocket diagnostics
-on the regular backend. Open **Diagnostyka** under the game to see the
-latest sample, ACK, prediction, confidence, HTTP status and time. The
-150-event history shows sent and received WebSocket messages. Match a
-prediction to a sample by connection number, `seq` and `positionId`. With
-the camera off before the round, the two sample buttons test transport.
+on the regular backend. **Diagnostyka** opens on the right, next to the game
+and camera, with compact spacing in narrow browser panels. It shows the
+latest prediction, confidence, HTTP status, time and ACK. Expand **Ostatnia
+próbka** for the latest sample JSON. The scrollable 150-event history shows
+sent and received WebSocket messages. Match a prediction to a sample by
+connection number, `seq` and `positionId`. With the camera off before the
+round, the two sample buttons test transport.
 [Start the diagnostic mode](local-development.md#vue-round-diagnostics) ·
 [Prediction message](api.md#round-prediction-diagnostics)
 

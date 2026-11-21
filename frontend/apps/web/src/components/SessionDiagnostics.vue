@@ -20,7 +20,7 @@ const {
     sendHandSample,
     sendNoHand,
 } = props.session;
-const open = ref(false);
+const open = ref(true);
 const feedback = ref('');
 const canTest = computed(
     () =>
@@ -60,24 +60,11 @@ function sample(hand: boolean) {
 <template>
     <details
         class="diagnostics card"
+        :open="open"
         @toggle="open = ($event.currentTarget as HTMLDetailsElement).open"
     >
         <summary>Diagnostyka</summary>
         <div class="overview">
-            <section aria-label="WebSocket">
-                <h3>WebSocket</h3>
-                <p>Połączenie: {{ connectionStatus }}</p>
-                <p v-if="error">{{ error.code }}: {{ error.message }}</p>
-                <p v-if="lastClose">Zamknięcie: {{ lastClose.code }} {{ lastClose.reason }}</p>
-                <dl>
-                    <dt>ID sesji</dt>
-                    <dd>{{ gameState?.sessionId ?? '—' }}</dd>
-                    <dt>Ostatni wysłany seq</dt>
-                    <dd data-testid="sent-seq">{{ lastSentSeq ?? '—' }}</dd>
-                    <dt>Ostatni ACK</dt>
-                    <dd data-testid="ack-seq">{{ lastSampleAck ?? '—' }}</dd>
-                </dl>
-            </section>
             <section aria-label="Predykcja AI">
                 <h3>Ostatnia predykcja AI</h3>
                 <template v-if="lastPrediction">
@@ -107,32 +94,23 @@ function sample(hand: boolean) {
                         <dd>{{ disposition[lastPrediction.disposition] }}</dd>
                     </dl>
                 </template>
-                <p v-else>
-                    Oczekiwanie na predykcję z rundy. Sprawdź, czy diagnostyka backendu jest
-                    włączona.
-                </p>
+                <p v-else>Oczekiwanie na predykcję z rundy.</p>
+            </section>
+            <section aria-label="WebSocket">
+                <h3>WebSocket</h3>
+                <p>Połączenie: {{ connectionStatus }}</p>
+                <p v-if="error">{{ error.code }}: {{ error.message }}</p>
+                <p v-if="lastClose">Zamknięcie: {{ lastClose.code }} {{ lastClose.reason }}</p>
+                <dl>
+                    <dt>ID sesji</dt>
+                    <dd>{{ gameState?.sessionId ?? '—' }}</dd>
+                    <dt>Ostatni wysłany seq</dt>
+                    <dd data-testid="sent-seq">{{ lastSentSeq ?? '—' }}</dd>
+                    <dt>Ostatni ACK</dt>
+                    <dd data-testid="ack-seq">{{ lastSampleAck ?? '—' }}</dd>
+                </dl>
             </section>
         </div>
-        <div class="actions">
-            <button
-                type="button"
-                :disabled="connectionStatus !== 'open' && connectionStatus !== 'connecting'"
-                @click="disconnect"
-            >
-                Rozłącz
-            </button>
-            <button type="button" :disabled="!canTest" @click="sample(true)">
-                Wyślij testową dłoń
-            </button>
-            <button type="button" :disabled="!canTest" @click="sample(false)">
-                Wyślij brak dłoni
-            </button>
-        </div>
-        <p v-if="feedback" aria-live="polite">{{ feedback }}</p>
-        <template v-if="sampleJson">
-            <h3>Ostatnia próbka</h3>
-            <pre tabindex="0">{{ sampleJson }}</pre>
-        </template>
         <template v-if="open">
             <h3>Historia WebSocket</h3>
             <p v-if="recentEvents.length === 0">Brak zdarzeń.</p>
@@ -152,12 +130,33 @@ function sample(hand: boolean) {
                 </li>
             </ol>
         </template>
+        <details v-if="sampleJson" class="sample">
+            <summary>Ostatnia próbka</summary>
+            <pre tabindex="0">{{ sampleJson }}</pre>
+        </details>
+        <div class="actions">
+            <button
+                type="button"
+                :disabled="connectionStatus !== 'open' && connectionStatus !== 'connecting'"
+                @click="disconnect"
+            >
+                Rozłącz
+            </button>
+            <button type="button" :disabled="!canTest" @click="sample(true)">
+                Wyślij testową dłoń
+            </button>
+            <button type="button" :disabled="!canTest" @click="sample(false)">
+                Wyślij brak dłoni
+            </button>
+        </div>
+        <p v-if="feedback" aria-live="polite">{{ feedback }}</p>
     </details>
 </template>
 
 <style scoped>
 .diagnostics {
-    margin-top: 1rem;
+    container-type: inline-size;
+    padding: 0.875rem;
     overflow-wrap: anywhere;
 }
 summary {
@@ -166,7 +165,11 @@ summary {
 }
 .overview {
     display: grid;
-    gap: 1rem;
+    gap: 0 0.875rem;
+    font-size: 0.9rem;
+}
+.overview section {
+    min-width: 0;
 }
 h3 {
     margin: 1rem 0 0.5rem;
@@ -196,6 +199,14 @@ dd {
     flex-wrap: wrap;
     margin-top: 0.75rem;
 }
+.actions button {
+    min-height: 2.125rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.875rem;
+}
+.sample {
+    margin-top: 0.75rem;
+}
 pre {
     max-height: 16rem;
     overflow: auto;
@@ -205,7 +216,7 @@ pre {
     border-radius: 0.5rem;
 }
 ol {
-    max-height: 24rem;
+    max-height: clamp(7rem, 26dvh, 16rem);
     overflow: auto;
     list-style: none;
     padding: 0;
@@ -215,9 +226,26 @@ li {
     padding: 0.45rem 0;
     border-bottom: 1px solid var(--border);
 }
-@media (min-width: 46rem) {
+@container (min-width: 22rem) {
     .overview {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@container (max-width: 12rem) {
+    .overview {
+        font-size: 0.8rem;
+    }
+    h3 {
+        margin: 0.75rem 0 0.25rem;
+        font-size: 0.875rem;
+    }
+    dl {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        column-gap: 0.25rem;
+    }
+    ol,
+    .sample {
+        font-size: 0.8rem;
     }
 }
 </style>

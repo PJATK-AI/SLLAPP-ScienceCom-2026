@@ -58,109 +58,125 @@ const gameError = computed(() => {
 </script>
 
 <template>
-    <section v-if="gameState?.status === 'FINISHED'" class="result" aria-labelledby="result-title">
-        <div class="result-summary card">
-            <h2 id="result-title">Koniec rundy</h2>
-            <p class="final-score">
-                <strong>{{ gameState.score }}</strong> pkt
-            </p>
-            <button type="button" class="primary" @click="resetSession">Nowa sesja</button>
-        </div>
-        <RoundRanking :key="gameState.sessionId" />
-    </section>
-
-    <section v-else aria-label="Runda">
-        <div v-if="!gameState" class="setup card">
-            <h2>Przygotuj się do gry</h2>
-            <p>Użyj dłoni, by zamigać litery wyświetlane w rundzie.</p>
-            <form @submit.prevent="createSession({ nickname, selectedHand })">
-                <fieldset :disabled="pendingAction !== null">
-                    <label for="nickname">Nick</label>
-                    <input id="nickname" v-model="nickname" required autocomplete="off" />
-                    <label for="selected-hand">Dłoń do migania</label>
-                    <select id="selected-hand" v-model="selectedHand">
-                        <option value="RIGHT">Prawa</option>
-                        <option value="LEFT">Lewa</option>
-                    </select>
-                    <button type="submit" class="primary">
-                        {{ pendingAction === 'create' ? 'Łączenie…' : 'Utwórz sesję' }}
-                    </button>
-                </fieldset>
-            </form>
-        </div>
-
-        <div v-if="connectionLost" class="connection card" role="status">
-            <p>Połączenie przerwane. Wznów sesję, aby pobrać stan rundy.</p>
-            <button
-                type="button"
-                class="primary"
-                :disabled="pendingAction !== null"
-                @click="reconnect"
-            >
-                {{ pendingAction === 'resume' ? 'Wznawianie…' : 'Wznów sesję' }}
-            </button>
-        </div>
-        <p v-if="gameError" class="error" role="alert">{{ gameError }}</p>
-
-        <div v-if="running" class="round-status card">
-            <div>
-                <p class="label">Zamigaj literę</p>
-                <p class="requested-letter" aria-live="polite">{{ running.expectedLetter }}</p>
-                <p class="word" :aria-label="`Słowo: ${running.word}`">
-                    <span
-                        v-for="(letter, index) in running.word"
-                        :key="index"
-                        :class="{
-                            current: index === running.letterIndex,
-                            complete: index < running.letterIndex,
-                        }"
-                        :aria-current="index === running.letterIndex ? 'step' : undefined"
-                        >{{ letter }}</span
-                    >
+    <div :class="{ 'with-diagnostics': diagnosticMode }">
+        <section
+            v-if="gameState?.status === 'FINISHED'"
+            class="result"
+            aria-labelledby="result-title"
+        >
+            <div class="result-summary card">
+                <h2 id="result-title">Koniec rundy</h2>
+                <p class="final-score">
+                    <strong>{{ gameState.score }}</strong> pkt
                 </p>
+                <button type="button" class="primary" @click="resetSession">Nowa sesja</button>
             </div>
-            <div class="metrics">
-                <div>
-                    <span class="label">Czas</span
-                    ><strong role="timer" :aria-label="`Pozostało ${clock}`">{{ clock }}</strong>
-                </div>
-                <div>
-                    <span class="label">Punkty</span
-                    ><strong aria-live="polite">{{ running.score }}</strong>
-                </div>
-            </div>
-            <p v-if="running.requiresRelease" class="release" role="status">
-                Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.
-            </p>
-            <p v-if="remainingSeconds === 0 && isReady" class="round-wait" role="status">
-                Czekamy na wynik rundy…
-            </p>
-        </div>
+            <RoundRanking :key="gameState.sessionId" />
+        </section>
 
-        <div v-if="gameState" class="play-area" :class="{ 'has-reference': running }">
-            <CameraTrackingPanel
-                :key="gameState.sessionId"
-                :ready="isReady"
-                :selected-hand="gameState.selectedHand"
-                :send-hand-sample="sendHandSample"
-                :send-no-hand="sendNoHand"
-                @active="cameraActive = $event"
-            >
+        <section v-else aria-label="Runda">
+            <div v-if="!gameState" class="setup card">
+                <h2>Przygotuj się do gry</h2>
+                <p>Użyj dłoni, by zamigać litery wyświetlane w rundzie.</p>
+                <form @submit.prevent="createSession({ nickname, selectedHand })">
+                    <fieldset :disabled="pendingAction !== null">
+                        <label for="nickname">Nick</label>
+                        <input id="nickname" v-model="nickname" required autocomplete="off" />
+                        <label for="selected-hand">Dłoń do migania</label>
+                        <select id="selected-hand" v-model="selectedHand">
+                            <option value="RIGHT">Prawa</option>
+                            <option value="LEFT">Lewa</option>
+                        </select>
+                        <button type="submit" class="primary">
+                            {{ pendingAction === 'create' ? 'Łączenie…' : 'Utwórz sesję' }}
+                        </button>
+                    </fieldset>
+                </form>
+            </div>
+
+            <div v-if="connectionLost" class="connection card" role="status">
+                <p>Połączenie przerwane. Wznów sesję, aby pobrać stan rundy.</p>
                 <button
-                    v-if="gameState.status === 'CREATED'"
                     type="button"
                     class="primary"
-                    :disabled="!isReady || !cameraActive || pendingAction !== null"
-                    @click="startGame"
+                    :disabled="pendingAction !== null"
+                    @click="reconnect"
                 >
-                    {{ pendingAction === 'start' ? 'Rozpoczynanie…' : 'Rozpocznij rundę' }}
+                    {{ pendingAction === 'resume' ? 'Wznawianie…' : 'Wznów sesję' }}
                 </button>
-            </CameraTrackingPanel>
-            <SignReference v-if="running" :expected-letter="running.expectedLetter" />
-        </div>
-    </section>
+            </div>
+            <p v-if="gameError" class="error" role="alert">{{ gameError }}</p>
 
-    <SessionDiagnostics v-if="diagnosticMode" :session="session" :camera-active="cameraActive" />
+            <div v-if="running" class="round-status card">
+                <div>
+                    <p class="label">Zamigaj literę</p>
+                    <p class="requested-letter" aria-live="polite">{{ running.expectedLetter }}</p>
+                    <p class="word" :aria-label="`Słowo: ${running.word}`">
+                        <span
+                            v-for="(letter, index) in running.word"
+                            :key="index"
+                            :class="{
+                                current: index === running.letterIndex,
+                                complete: index < running.letterIndex,
+                            }"
+                            :aria-current="index === running.letterIndex ? 'step' : undefined"
+                            >{{ letter }}</span
+                        >
+                    </p>
+                </div>
+                <div class="metrics">
+                    <div>
+                        <span class="label">Czas</span
+                        ><strong role="timer" :aria-label="`Pozostało ${clock}`">{{
+                            clock
+                        }}</strong>
+                    </div>
+                    <div>
+                        <span class="label">Punkty</span
+                        ><strong aria-live="polite">{{ running.score }}</strong>
+                    </div>
+                </div>
+                <p v-if="running.requiresRelease" class="release" role="status">
+                    Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.
+                </p>
+                <p v-if="remainingSeconds === 0 && isReady" class="round-wait" role="status">
+                    Czekamy na wynik rundy…
+                </p>
+            </div>
+
+            <div
+                v-if="gameState"
+                class="play-area"
+                :class="{ 'has-reference': running && !diagnosticMode }"
+            >
+                <CameraTrackingPanel
+                    :key="gameState.sessionId"
+                    :ready="isReady"
+                    :selected-hand="gameState.selectedHand"
+                    :send-hand-sample="sendHandSample"
+                    :send-no-hand="sendNoHand"
+                    @active="cameraActive = $event"
+                >
+                    <button
+                        v-if="gameState.status === 'CREATED'"
+                        type="button"
+                        class="primary"
+                        :disabled="!isReady || !cameraActive || pendingAction !== null"
+                        @click="startGame"
+                    >
+                        {{ pendingAction === 'start' ? 'Rozpoczynanie…' : 'Rozpocznij rundę' }}
+                    </button>
+                </CameraTrackingPanel>
+                <SignReference v-if="running" :expected-letter="running.expectedLetter" />
+            </div>
+        </section>
+
+        <SessionDiagnostics
+            v-if="diagnosticMode"
+            :session="session"
+            :camera-active="cameraActive"
+        />
+    </div>
 </template>
 
 <style scoped>
@@ -206,6 +222,14 @@ label {
     display: grid;
     align-items: start;
     gap: 1rem;
+}
+.with-diagnostics {
+    display: grid;
+    align-items: start;
+    gap: 1rem;
+}
+.with-diagnostics > section {
+    min-width: 0;
 }
 .round-status {
     display: grid;
@@ -284,6 +308,17 @@ label {
 .final-score strong {
     font-size: clamp(2.5rem, 8vw, 4rem);
 }
+@media (min-width: 18rem) {
+    .with-diagnostics {
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    }
+    .with-diagnostics .diagnostics {
+        position: sticky;
+        top: 0.75rem;
+        max-height: calc(100dvh - 1.5rem);
+        overflow: auto;
+    }
+}
 @media (min-width: 48rem) {
     .play-area.has-reference {
         grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
@@ -291,10 +326,43 @@ label {
     .result {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
     }
+    .with-diagnostics .result {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 @media (max-width: 26rem) {
     .round-status {
         grid-template-columns: 1fr;
+    }
+}
+@media (max-width: 36rem) {
+    .with-diagnostics {
+        gap: 0.5rem;
+    }
+    .with-diagnostics :deep(.card) {
+        padding: 0.625rem;
+    }
+    .with-diagnostics h2 {
+        font-size: 1.125rem;
+    }
+    .with-diagnostics fieldset > * {
+        min-width: 0;
+    }
+    .with-diagnostics .requested-letter {
+        font-size: 2.5rem;
+    }
+    .with-diagnostics .round-status {
+        gap: 0.5rem;
+    }
+    .with-diagnostics .metrics {
+        gap: 0.25rem;
+    }
+    .with-diagnostics .metrics div {
+        padding: 0.2rem 0.35rem;
+        font-size: 0.75rem;
+    }
+    .with-diagnostics :deep(.camera video) {
+        min-height: 4rem;
     }
 }
 </style>

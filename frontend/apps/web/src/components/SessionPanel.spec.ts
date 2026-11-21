@@ -95,7 +95,7 @@ it('creates a selected session, sends both test samples and displays acknowledge
     const button = (text: string) => wrapper.findAll('button').find((b) => b.text() === text)!;
     await button('Wyślij testową dłoń').trigger('click');
     const hand = JSON.parse(socket.send.mock.calls[1]![0]);
-    expect(JSON.parse(wrapper.get('pre').text())).toEqual(hand);
+    expect(JSON.parse(wrapper.get('.sample pre').text())).toEqual(hand);
     expect(hand.hand.handedness).toBe('LEFT');
     expect(hand.hand.coordinateSpace).toBe('MEDIAPIPE_IMAGE');
     expect(hand.hand.landmarks).toHaveLength(21);
@@ -110,15 +110,14 @@ it('creates a selected session, sends both test samples and displays acknowledge
     expect(wrapper.get('[data-testid="ack-seq"]').text()).toBe('1');
     socket.bufferedAmount = 1;
     await button('Wyślij brak dłoni').trigger('click');
-    expect(JSON.parse(wrapper.get('pre').text())).toEqual(
+    expect(JSON.parse(wrapper.get('.sample pre').text())).toEqual(
         JSON.parse(socket.send.mock.calls[2]![0]),
     );
     expect(wrapper.text()).toContain('Próbka pominięta');
     expect(wrapper.get('[data-testid="sent-seq"]').text()).toBe('1');
-    const diagnostics = wrapper.get('details');
-    expect(diagnostics.attributes('open')).toBeUndefined();
-    (diagnostics.element as HTMLDetailsElement).open = true;
-    await diagnostics.trigger('toggle');
+    expect(wrapper.find('.with-diagnostics > [aria-label="Runda"] video').exists()).toBe(true);
+    const diagnostics = wrapper.get('.with-diagnostics > .diagnostics');
+    expect(diagnostics.attributes('open')).toBeDefined();
     expect(diagnostics.text()).toContain('Odebrano · sample_ack · seq 1');
     socket.message({
         type: 'prediction_result',
@@ -190,7 +189,7 @@ it.each(['LEFT', 'RIGHT'] as const)(
         expect(points()[0]!.attributes('style')).toContain('top: 40%');
         tracker.frame(null, interval - 1);
         await nextTick();
-        expect(JSON.parse(wrapper.get('pre').text())).toEqual(
+        expect(JSON.parse(wrapper.get('.sample pre').text())).toEqual(
             JSON.parse(socket.send.mock.calls[1]![0]),
         );
         expect(points()).toHaveLength(0);
@@ -230,10 +229,10 @@ it.each(['LEFT', 'RIGHT'] as const)(
         resumed.message(confirm);
         await nextTick();
         expect(sample(resumed)).toEqual([]);
-        expect(wrapper.find('pre').exists()).toBe(false);
+        expect(wrapper.find('.sample pre').exists()).toBe(false);
         tracker.frame(null, 5 * interval + 1);
         await nextTick();
-        expect(JSON.parse(wrapper.get('pre').text())).toEqual(sample(resumed)[0]);
+        expect(JSON.parse(wrapper.get('.sample pre').text())).toEqual(sample(resumed)[0]);
         await button('Zatrzymaj kamerę').trigger('click');
         tracker.frame(hand, 6 * interval + 1);
         expect(button('Wyślij testową dłoń').attributes('disabled')).toBeUndefined();

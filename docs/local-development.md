@@ -81,9 +81,9 @@ From `frontend/`, start the diagnostics variant of the app:
 pnpm dev:diagnostics
 ```
 
-Open [the game](http://127.0.0.1:5173) and expand **Diagnostyka**. This view
-uses the same camera and session as the game. For raw Java-to-Python HTTP
-bodies, use the separately launched [recognition panel](#recognition-diagnostics).
+Open [the game](http://127.0.0.1:5173). **Diagnostyka** opens to the right of
+the camera. The columns stack below 288 CSS pixels. For raw Java-to-Python
+HTTP bodies, use the separately launched [recognition panel](#recognition-diagnostics).
 
 ## Recognition diagnostics
 
