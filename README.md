@@ -151,6 +151,33 @@ The tester uses the backend's engine, default rules and bundled catalog. The
 profile loads the panel from the test classpath and uses a database under
 `backend/target/game-test-data/`.
 
+### Camera recognition diagnostics
+
+The local diagnostics panel shows the selected hand and its 21 landmarks,
+WebSocket sample traffic, and the HTTP requests and predictions observed by
+the Java AI client. It runs on the backend test classpath, independently of
+player sessions and the ranking.
+
+Prepare the browser assets once from `frontend/`:
+
+```sh
+pnpm setup:recognition
+```
+
+From `backend/`, run `sh mvnw -Precognition-test` to test tracking and
+WebSocket traffic with prediction disabled. To see actual predictions, start
+the [Python prediction service](model/README.md#prediction-service) with the
+trained model at `model/artifacts/model.joblib`, then run
+`sh mvnw -Precognition-ai`. On Windows, replace `sh mvnw` with `mvnw.cmd`
+in Command Prompt or `.\mvnw.cmd` in PowerShell.
+
+Open [the diagnostics panel](http://127.0.0.1:8082/recognition-test),
+select the physical hand, click **Uruchom kamerę**, and click
+**Połącz WebSocket**. Show the selected hand to send `hand_sample`, then
+move it out of frame to send `no_hand`. Expand an event to inspect the
+request or response. With AI enabled the panel also shows the HTTP status,
+prediction, confidence and elapsed time.
+
 ### Frontend WebSocket test panel
 
 Set `VITE_WS_URL=ws://127.0.0.1:8080/ws` in `frontend/apps/web/.env.local`

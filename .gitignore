@@ -31,5 +31,9 @@ __pycache__/
 # do not commit datasets)
 model/data/SPAS/
 
-# Trained models and training reports (do not commit model weights)
-model/artifacts/
+# Trained models and training reports: only the current model, its checksum
+# and its report are committed
+model/artifacts/*
+!model/artifacts/model.joblib
+!model/artifacts/model.joblib.sha256
+!model/artifacts/report.md
