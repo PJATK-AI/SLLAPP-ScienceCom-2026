@@ -55,6 +55,15 @@
 
     <profiles>
         <profile>
+            <id>game-test</id>
+            <properties>
+                <spring-boot.run.profiles>game-test</spring-boot.run.profiles>
+            </properties>
+            <build>
+                <defaultGoal>spring-boot:test-run</defaultGoal>
+            </build>
+        </profile>
+        <profile>
             <id>recognition-test</id>
             <properties>
                 <spring-boot.run.profiles>recognition-test</spring-boot.run.profiles>

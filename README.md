@@ -39,13 +39,13 @@ sh mvnw spring-boot:run
 
 ```sh
 cd frontend
-test -f apps/web/.env.local || cp .env.example apps/web/.env.local
-pnpm install --frozen-lockfile
-pnpm prepare:camera
-pnpm --filter @sllapp/web dev --host 127.0.0.1 --port 5173 --strictPort
+pnpm setup:local
+pnpm dev
 ```
 
-On subsequent starts, run the last command from `frontend/`.
+Run `pnpm setup:local` on first setup. It installs the locked dependencies,
+creates `apps/web/.env.local` if needed and prepares the camera assets.
+Use `pnpm dev` for subsequent starts.
 
 Open [the browser app](http://127.0.0.1:5173), enter a nickname and select a
 hand. Click **Utwórz sesję**, then **Uruchom kamerę**. Watch the landmarks and
@@ -78,7 +78,7 @@ of `sh mvnw`.
 
 | Panel | Start |
 | --- | --- |
-| [Game engine tester](docs/local-development.md#game-engine-tester) | `sh mvnw spring-boot:test-run -Dspring-boot.run.profiles=game-test` |
+| [Game engine tester](docs/local-development.md#game-engine-tester) | `sh mvnw -Pgame-test` |
 | [Camera and WebSocket diagnostics](docs/local-development.md#recognition-diagnostics) | `sh mvnw -Precognition-test` |
 | [Recognition diagnostics with Python](docs/local-development.md#run-recognition-with-the-python-service) | `sh mvnw -Precognition-ai` |
 

@@ -31,9 +31,10 @@ diagnostic mode. [WebSocket configuration](api.md#websocket-configuration)
 ## Configuration
 
 Vite reads environment variables from `frontend/apps/web/.env.local`.
-Create it from the [example file](../frontend/.env.example) on first setup.
-The example points at the local backend. Restart Vite after editing the file.
-The [quick start](../README.md#quick-start) uses `127.0.0.1:5173`.
+`pnpm setup:local` creates it from the [example file](../frontend/.env.example)
+if it is missing. The example points at the local backend. Restart Vite after
+editing the file. `pnpm dev` serves the app at `127.0.0.1:5173` and reports an
+error if the port is busy.
 
 | Variable | Value for local use |
 | --- | --- |
