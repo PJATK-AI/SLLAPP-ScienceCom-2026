@@ -91,11 +91,23 @@ export function useGameSession(
         lastClose.value = null;
         let url: URL;
         try {
-            url = new URL(options.url ?? import.meta.env.VITE_WS_URL ?? '');
+            const configuredUrl = options.url ?? import.meta.env.VITE_WS_URL ?? '';
+            if (configuredUrl.startsWith('/')) {
+                const origin = window.location.origin;
+                url = new URL(configuredUrl, origin);
+                if (configuredUrl.startsWith('//') || url.origin !== origin) throw new Error();
+                url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+            } else {
+                url = new URL(configuredUrl);
+            }
             if (!['ws:', 'wss:'].includes(url.protocol) || url.hash) throw new Error();
             if (options.diagnostics) url.searchParams.set('diagnostics', '1');
         } catch {
-            fail('configuration', 'INVALID_URL', 'Set VITE_WS_URL to a valid ws:// or wss:// URL.');
+            fail(
+                'configuration',
+                'INVALID_URL',
+                'Set VITE_WS_URL to a ws:// or wss:// URL or a same-origin path such as /ws.',
+            );
             return;
         }
         let current: WebSocket;

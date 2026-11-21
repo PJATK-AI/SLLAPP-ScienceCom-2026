@@ -67,6 +67,7 @@ function setup(diagnostics = false) {
 afterEach(() => {
     scopes.splice(0).forEach((s) => s.stop());
     Socket.all = [];
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.useRealTimers();
 });
@@ -244,14 +245,30 @@ it('handles confirmation timeout and send exceptions', () => {
     expect(client.sendNoHand()).toBe(false);
     expect(client.isReady.value).toBe(false);
 });
-it('rejects invalid URLs before constructing a socket', () => {
+it.each([
+    ['http://127.0.0.1:8088', 'ws://127.0.0.1:8088/ws'],
+    ['https://game.example', 'wss://game.example/ws'],
+])('connects to a configured same-origin path from %s', (origin, expectedUrl) => {
     vi.stubGlobal('WebSocket', Socket);
-    const client = useGameSession({ url: 'https://localhost/ws' });
+    vi.stubGlobal('location', { origin });
+    vi.stubEnv('VITE_WS_URL', '/ws');
+    const client = useGameSession();
     client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
-    expect(client.error.value?.source).toBe('configuration');
-    expect(Socket.all).toHaveLength(0);
+    expect(Socket.all[0]?.url).toBe(expectedUrl);
     client.dispose();
 });
+
+it.each(['https://localhost/ws', '//other.example/ws', '/\\other.example/ws', '/ws#fragment'])(
+    'rejects invalid URL %s before constructing a socket',
+    (url) => {
+        vi.stubGlobal('WebSocket', Socket);
+        const client = useGameSession({ url });
+        client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
+        expect(client.error.value?.source).toBe('configuration');
+        expect(Socket.all).toHaveLength(0);
+        client.dispose();
+    },
+);
 
 it('correlates bounded diagnostics with the socket without changing the round', () => {
     const { client, socket } = setup(true);

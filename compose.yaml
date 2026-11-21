@@ -1,0 +1,55 @@
+services:
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8088:80"
+
+  backend:
+    build: ./backend
+    environment:
+      SERVER_ADDRESS: "0.0.0.0"
+      DATA_DIR: /data
+      AI_PREDICTION_ENABLED: "true"
+      AI_PREDICTION_BASE_URL: http://model:8000
+      SPRING_APPLICATION_JSON: >-
+        {"sllapp":{"web":{"allowed-origins":["http://127.0.0.1:8088","http://localhost:8088"]}}}
+    volumes:
+      - ranking:/data
+    depends_on:
+      model:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/api/ranking?limit=1"]
+      interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 15
+
+  model:
+    build: ./model
+    environment:
+      SLLAPP_PREDICT_HOST: "0.0.0.0"
+      SLLAPP_MODEL_PATH: /app/model/artifacts/model.joblib
+    volumes:
+      - type: bind
+        source: ./model/artifacts/model.joblib
+        target: /app/model/artifacts/model.joblib
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2).close()"
+      interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 15
+
+volumes:
+  ranking:
