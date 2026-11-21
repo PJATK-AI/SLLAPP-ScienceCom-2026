@@ -1,7 +1,9 @@
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import SessionPanel from './SessionPanel.vue';
+import SignReference from './SignReference.vue';
+import { gameLetters } from '@/models/game-session';
 import {
     type Hand,
     type HandTrackerOptions,
@@ -61,11 +63,14 @@ class Socket extends EventTarget {
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
 });
 it('creates a selected session, sends both test samples and displays acknowledgements', async () => {
     mockCamera();
     vi.stubGlobal('WebSocket', Socket);
     vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+    vi.stubEnv('MODE', 'diagnostics');
+    vi.stubEnv('DEV', true);
     const wrapper = mount(SessionPanel);
     await wrapper.get('input').setValue('Ola');
     await wrapper.get('select').setValue('LEFT');
@@ -121,6 +126,8 @@ it.each(['LEFT', 'RIGHT'] as const)(
     async (selectedHand) => {
         vi.stubGlobal('WebSocket', Socket);
         vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+        vi.stubEnv('MODE', 'diagnostics');
+        vi.stubEnv('DEV', true);
         // Exercise the default and an explicit alternative rate.
         vi.stubEnv('VITE_HAND_SAMPLE_HZ', selectedHand === 'LEFT' ? '' : '20');
         const interval = selectedHand === 'LEFT' ? 100 : 50;
@@ -222,3 +229,123 @@ it.each(['LEFT', 'RIGHT'] as const)(
         wrapper.unmount();
     },
 );
+
+it('shows exactly one reference crop for each supported letter', async () => {
+    const wrapper = mount(SignReference, { props: { expectedLetter: 'A' } });
+    const crops = new Set<string>();
+    for (const letter of gameLetters) {
+        await wrapper.setProps({ expectedLetter: letter });
+        const images = wrapper.findAll('[role="img"]');
+        expect(images).toHaveLength(1);
+        expect(images[0]!.attributes('aria-label')).toBe(`Układ dłoni dla litery ${letter}`);
+        crops.add((images[0]!.element as HTMLElement).style.backgroundPosition);
+    }
+    expect(crops.size).toBe(gameLetters.length);
+    wrapper.unmount();
+});
+
+it('plays and resumes a round, then keeps the final score through a ranking failure', async () => {
+    vi.stubGlobal('WebSocket', Socket);
+    vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost/api');
+    vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance'],
+    });
+    const fetchRanking = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValueOnce(
+            new Response(JSON.stringify([{ rank: 1, nickname: 'Ola', score: 20 }])),
+        );
+    vi.stubGlobal('fetch', fetchRanking);
+    const tracker = mockCamera();
+    const wrapper = mount(SessionPanel);
+    const button = (text: string) =>
+        wrapper.findAll('button').find((item) => item.text() === text)!;
+    await wrapper.get('input').setValue('Ola');
+    await wrapper.get('form').trigger('submit');
+    const socket = Socket.last;
+    socket.readyState = 1;
+    socket.dispatchEvent(new Event('open'));
+    const created = {
+        type: 'game_state',
+        sessionId: '12345678-1234-1234-1234-123456789abc',
+        status: 'CREATED',
+        nickname: 'Ola',
+        selectedHand: 'RIGHT',
+        positionId: null,
+    };
+    socket.message(created);
+    await nextTick();
+    expect(button('Rozpocznij rundę').attributes('disabled')).toBeDefined();
+    await button('Uruchom kamerę').trigger('click');
+    expect(button('Rozpocznij rundę').attributes('disabled')).toBeUndefined();
+    await button('Rozpocznij rundę').trigger('click');
+    expect(JSON.parse(socket.send.mock.calls[1]![0])).toEqual({ type: 'start_game' });
+    expect(button('Rozpoczynanie…').attributes('disabled')).toBeDefined();
+
+    const running = {
+        ...created,
+        status: 'RUNNING',
+        positionId: 1,
+        word: 'LAS',
+        letterIndex: 0,
+        expectedLetter: 'L',
+        remainingMs: 10000,
+        score: 0,
+        requiresRelease: true,
+    };
+    socket.message(running);
+    await nextTick();
+    expect(wrapper.get('[aria-current="step"]').text()).toBe('L');
+    expect(wrapper.get('[role="img"]').attributes('aria-label')).toContain('litery L');
+    expect(wrapper.text()).toContain('Wyjmij dłoń z kadru');
+    expect(wrapper.get('[role="timer"]').text()).toBe('00:10');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(wrapper.get('[role="timer"]').text()).toBe('00:08');
+    socket.message({ ...running, requiresRelease: false, remainingMs: 8100 });
+    await nextTick();
+    expect(wrapper.text()).not.toContain('Wyjmij dłoń z kadru');
+    const nextPosition = {
+        ...running,
+        positionId: 2,
+        letterIndex: 1,
+        expectedLetter: 'A',
+        remainingMs: 1000,
+        score: 10,
+        requiresRelease: false,
+    };
+    socket.message(nextPosition);
+    await nextTick();
+    expect(wrapper.get('[aria-current="step"]').text()).toBe('A');
+    expect(wrapper.get('[role="img"]').attributes('aria-label')).toContain('litery A');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[role="timer"]').text()).toBe('00:00');
+    expect(wrapper.text()).not.toContain('Koniec rundy');
+
+    socket.dispatchEvent(new CloseEvent('close', { code: 1006 }));
+    await nextTick();
+    await button('Wznów sesję').trigger('click');
+    const resumed = Socket.last;
+    resumed.readyState = 1;
+    resumed.dispatchEvent(new Event('open'));
+    const final = { ...created, status: 'FINISHED', remainingMs: 0, score: 20 };
+    resumed.message(final);
+    await flushPromises();
+    expect(tracker.stop).toHaveBeenCalledOnce();
+    expect(wrapper.find('video').exists()).toBe(false);
+    expect(wrapper.get('.final-score').text()).toBe('20 pkt');
+    expect(wrapper.text()).toContain('Nie udało się pobrać rankingu');
+    resumed.message(final);
+    await nextTick();
+    expect(fetchRanking).toHaveBeenCalledTimes(1);
+
+    await button('Ponów').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('tbody').text()).toContain('Ola');
+    expect(fetchRanking).toHaveBeenCalledTimes(2);
+    await button('Nowa sesja').trigger('click');
+    expect(wrapper.find('form').exists()).toBe(true);
+    expect(resumed.close).toHaveBeenCalled();
+    wrapper.unmount();
+});

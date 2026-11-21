@@ -48,9 +48,10 @@ creates `apps/web/.env.local` if needed and prepares the camera assets.
 Use `pnpm dev` for subsequent starts.
 
 Open [the browser app](http://127.0.0.1:5173), enter a nickname and select a
-hand. Click **Utwórz sesję**, then **Uruchom kamerę**. Watch the landmarks and
-the last sample sent over WebSocket. To check the backend separately, open
-[`/api/ranking`](http://127.0.0.1:8080/api/ranking). A fresh database returns `[]`.
+hand. Click **Utwórz sesję**, then **Uruchom kamerę**. To play, first [enable
+prediction on the regular backend](docs/local-development.md#enable-prediction-on-the-regular-backend).
+Click **Rozpocznij rundę**, then sign the highlighted letters using the hand
+reference beside the camera. The final score and ranking appear when the round ends.
 
 ## Prediction service
 
@@ -63,8 +64,8 @@ python -m model.service
 ```
 
 Check [`/health`](http://127.0.0.1:8000/health). For an artifact in a different
-directory, pass `--model path/to/model.joblib`. To see predictions in the
-browser, [enable AI in the recognition panel](docs/local-development.md#run-recognition-with-the-python-service).
+directory, pass `--model path/to/model.joblib`. For the Vue game, start the
+[regular backend with AI enabled](docs/local-development.md#enable-prediction-on-the-regular-backend).
 
 During a round, the backend completes the active letter after three matching
 predictions with confidence at least `0.80` and no more than `350ms` between
@@ -99,5 +100,7 @@ For either recognition mode, run `pnpm setup:recognition` once from
 ## License
 
 [MIT License](LICENSE) · Copyright © 2026 PJATK{AI}.
+
+The [fingerspelling chart](docs/frontend.md) is available under CC BY-SA 3.0.
 
 <p align="right"><a href="#readme-top">Back to top ↑</a></p>
