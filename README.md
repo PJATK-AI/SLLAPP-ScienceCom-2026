@@ -10,381 +10,89 @@
     <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square" alt="SQLite">
   </p>
   <p>
+    <a href="#quick-start">Quick start</a> ·
+    <a href="#prediction-service">Start the model</a> ·
+    <a href="#local-tools">Local tools</a>
+  </p>
+  <p>
     <a href="docs/api.md">API reference</a> ·
     <a href="docs/backend-architecture.md">Backend architecture</a> ·
     <a href="https://github.com/PJATK-AI/SLLAPP-ScienceCom-2026/issues">Issues</a>
   </p>
 </div>
 
-<details>
-  <summary>Table of contents</summary>
+## Quick start
 
-- [About the project](#about-the-project)
-- [Getting started](#getting-started)
-- [Usage](#usage)
-- [Repository structure](#repository-structure)
-- [Development and testing](#development-and-testing)
-- [Documentation and contributing](#documentation-and-contributing)
-- [License](#license)
+**Requirements** · JDK 21 · Node.js 24.15+ · pnpm 12.21.0
 
-</details>
+Run each block from the repository root in its own terminal.
+[PowerShell quick start](docs/local-development.md#windows-quick-start)
 
-## About the project
+### Backend · terminal 1
 
-SLLAPP is the Sign Language Learning Application project for ScienceCom 2026,
-maintained by PJATK AI.
-
-The backend includes a standalone Java engine for the spelling game. It also
-creates player sessions over WebSocket, validates hand samples, stores game
-results and serves an ordered ranking over REST. The
-frontend workspace contains a Vue WebSocket session test panel, a MediaPipe hand
-tracker and its Vue wrapper. The panel creates and resumes sessions and sends
-synthetic hand samples for transport testing.
-
-| Component | Technologies |
-| --- | --- |
-| Backend | Java 21, Spring Boot, WebSocket, Spring JDBC, SQLite |
-| Frontend | Vue 3, TypeScript, Vite, MediaPipe Hand Landmarker |
-| Build and tests | Maven Wrapper, pnpm, Turborepo, JUnit, Vitest |
-| CI | GitHub Actions |
-
-## Getting started
-
-### Prerequisites
-
-| Tool | Required version |
-| --- | --- |
-| JDK | 21 |
-| Node.js | 24.15 or newer |
-| pnpm | 12.21.0, as declared in `frontend/package.json` |
-
-The backend includes the Maven Wrapper. SQLite runs inside the backend process
-and stores data in a local file.
-
-### Start the backend
-
-From the repository root, run:
-
-```powershell
+```sh
 cd backend
-.\mvnw.cmd spring-boot:run
+sh mvnw spring-boot:run
 ```
 
-On Linux or macOS, use `sh mvnw spring-boot:run` from `backend/`.
-The server listens on **http://127.0.0.1:8080**.
-
-### Connect the prediction service
-
-The Java prediction client is disabled by default. Start the
-[Python prediction service](model/README.md#prediction-service) with a model
-artifact it can load. Export the settings from [the backend example](backend/.env.example)
-to the backend process and enable the client. On Linux or macOS, run from
-`backend/`.
-
-```sh
-AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 AI_PREDICTION_TIMEOUT=250ms sh mvnw spring-boot:run
-```
-
-The timeout defaults to `250ms`. Enabling the client requires an absolute
-HTTP(S) base URL. At startup the backend logs the model metadata or a health
-check failure while continuing to serve requests. The
-[backend architecture](docs/backend-architecture.md#ai-prediction-client)
-describes the client interface and diagnostics.
-
-### Start the frontend
-
-The web application reads the backend REST API address from
-`VITE_API_BASE_URL`. [`frontend/.env.example`](frontend/.env.example) shows the
-value for the local backend. Vite loads environment files from
-`frontend/apps/web/`, so put the variable in `frontend/apps/web/.env.local`:
-
-```sh
-cp frontend/.env.example frontend/apps/web/.env.local
-```
-
-When the variable is missing, API calls fail with a configuration error.
-
-In a second terminal, from the repository root, run:
+### Frontend · terminal 2
 
 ```sh
 cd frontend
+test -f apps/web/.env.local || cp .env.example apps/web/.env.local
 pnpm install --frozen-lockfile
 pnpm prepare:camera
-pnpm dev
+pnpm --filter @sllapp/web dev --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open the local URL printed by Vite.
+On subsequent starts, run the last command from `frontend/`.
 
-## Usage
+Open [the browser app](http://127.0.0.1:5173), enter a nickname and select a
+hand. Click **Utwórz sesję**, then **Uruchom kamerę**. Watch the landmarks and
+the last sample sent over WebSocket. To check the backend separately, open
+[`/api/ranking`](http://127.0.0.1:8080/api/ranking). A fresh database returns `[]`.
 
-### Use the game engine
+## Prediction service
 
-Java callers create a `GameEngine` with rules, a word picker, a start time and
-a deadline. The bundled catalog contains Polish words of lengths 3–7. The
-engine returns the current letter, position ID, remaining time and score,
-and advances when the caller completes the current position before the
-deadline. `GameRules.defaults()` sets the maximum word length to 7, letter
-points to 10, the word bonus to 20 and the multiplier step to 1. To configure
-these values per game, pass a custom `GameRules` instance. See the
-[Java usage example and scoring rules](docs/backend-architecture.md#standalone-game-engine).
-
-### Open the game engine tester
-
-From `backend/` on Linux or macOS, start Spring Boot with the `game-test` profile.
+The repository includes the trained model at `model/artifacts/model.joblib`.
+With the Python 3.13 environment active, run from the repository root in a
+separate terminal. [Python and model setup](docs/local-development.md#run-recognition-with-the-python-service)
 
 ```sh
-sh mvnw spring-boot:test-run -Dspring-boot.run.profiles=game-test
+python -m model.service
 ```
 
-On Windows PowerShell, use:
+Check [`/health`](http://127.0.0.1:8000/health). For an artifact in a different
+directory, pass `--model path/to/model.joblib`. To see predictions in the
+browser, [enable AI in the recognition panel](docs/local-development.md#run-recognition-with-the-python-service).
 
-```powershell
-.\mvnw.cmd spring-boot:test-run "-Dspring-boot.run.profiles=game-test"
-```
+## Local tools
 
-Open the [game preview](http://127.0.0.1:8081/game-test) and select **Start
-game** for a 60-second round with random words. Click **Complete letter**
-to simulate a recognized sign. Watch the active letter, score, last award
-and countdown update from the engine. **New game** starts a fresh round.
+Run the panel commands from `backend/`. On Windows, use `.\mvnw.cmd` in place
+of `sh mvnw`.
 
-The tester uses the backend's engine, default rules and bundled catalog. The
-profile loads the panel from the test classpath and uses a database under
-`backend/target/game-test-data/`.
-
-### Camera recognition diagnostics
-
-The local diagnostics panel shows the selected hand and its 21 landmarks,
-WebSocket sample traffic, and the HTTP requests and predictions observed by
-the Java AI client. It runs on the backend test classpath, independently of
-player sessions and the ranking.
-
-Prepare the browser assets once from `frontend/`:
-
-```sh
-pnpm setup:recognition
-```
-
-From `backend/`, run `sh mvnw -Precognition-test` to test tracking and
-WebSocket traffic with prediction disabled. To see actual predictions, start
-the [Python prediction service](model/README.md#prediction-service) with the
-trained model at `model/artifacts/model.joblib`, then run
-`sh mvnw -Precognition-ai`. On Windows, replace `sh mvnw` with `mvnw.cmd`
-in Command Prompt or `.\mvnw.cmd` in PowerShell.
-
-Open [the diagnostics panel](http://127.0.0.1:8082/recognition-test),
-select the physical hand, click **Uruchom kamerę**, and click
-**Połącz WebSocket**. Show the selected hand to send `hand_sample`, then
-move it out of frame to send `no_hand`. Expand an event to inspect the
-request or response. With AI enabled the panel also shows the HTTP status,
-prediction, confidence and elapsed time.
-
-### Frontend WebSocket test panel
-
-Set `VITE_WS_URL=ws://127.0.0.1:8080/ws` in `frontend/apps/web/.env.local`
-(using `frontend/.env.example`) and restart Vite. The page provides a nickname
-and hand selection, session creation, disconnect and manual resume controls.
-An open socket is ready to send samples only after the server confirms the session.
-
-The sample buttons send one synthetic 21-point hand or one `no_hand` message.
-They test transport, not camera tracking or gesture recognition. The panel shows
-session ID, connection status, the last sent sequence and optional `sample_ack`.
-Enable `sllapp.websocket.diagnostic-mode=true` on the backend to see acknowledgements.
-Sending also works when acknowledgements are disabled.
-
-### Stream hand landmarks from the camera
-
-Run `pnpm prepare:camera` from `frontend/` after installing dependencies and
-before starting Vite or building the web app. It downloads version 1 of Google's
-float16 Hand Landmarker and copies the WASM runtime from the installed MediaPipe
-package to `apps/web/public/mediapipe/`. Vite serves these files locally and
-includes them in the production build. Custom deployments can set
-`VITE_HAND_LANDMARKER_MODEL_URL` to the model file and
-`VITE_HAND_LANDMARKER_WASM_PATH` to the matching runtime directory.
-
-1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
-   hand and create a session. After confirmation, click **Uruchom kamerę** and
-   allow camera access. The preview marks the 21 detected landmarks on the selected
-   hand using the original camera coordinates. The dots disappear when that hand
-   leaves the frame.
-2. Show the selected hand. Each eligible frame sends `hand_sample` with 21
-   image landmarks. For the left hand the client reflects x once and keeps
-   the `LEFT` label. An empty frame or a frame with only the other hand sends
-   `no_hand`. Both messages share the `VITE_HAND_SAMPLE_HZ` limit (default 10
-   per second). The client drops intermediate frames and skips a busy socket.
-3. The JSON panel displays the complete last sample sent over the socket from
-   the camera or either test button. Skipped frames leave the displayed sample
-   in place. In diagnostic mode, check the last sent sequence and the corresponding
-   `sample_ack` for each type. **Rozłącz** pauses sending and keeps the preview.
-   After **Wznów sesję**, the first fresh eligible frame starts the new sequence.
-4. Click **Zatrzymaj kamerę** to release the camera and enable the synthetic
-   test buttons again. Leaving the view or losing the session also releases it.
-
-If camera permission is denied, allow it in the browser and start again.
-For a model load error, check that the model file and WASM directory are served
-at the configured paths. After editing `.env.local`, restart Vite.
-
-Reconnection retains the session ID in memory and resets the sample sequence
-on the new confirmed connection. Reloading the page loses that ID. Closure code
-1008 clears an expired or unavailable session and enables creating another one.
-The client waits up to 10 seconds for connection opening and another 10 seconds
-for session confirmation. It does not reconnect automatically.
-
-### Read hand landmarks in Vue
-
-`useHandTracker` from `@sllapp/hand-landmarker-vue` exposes the latest selected
-hand through `hand.value`. When a hand is detected, both arrays contain 21
-points in MediaPipe order.
-
-```ts
-const imagePoints = hand.value?.landmarks;
-const wristPoints = hand.value?.wristRelativeLandmarks;
-```
-
-Use the original image points to draw an overlay. Their x and y coordinates are
-normalized to the image, and z is the depth reported by MediaPipe. Wrist-relative
-points subtract landmark 0 from each point on all three axes, so the wrist is
-at (0, 0, 0). This translation preserves scale and orientation. Each array has
-its own point objects. The tracker skips detections with missing or invalid
-coordinates and reports `null` if no valid hand remains.
-
-For a classifier trained on right-hand image landmarks, prepare a separate copy
-with `normalizeHandForModel` from `@sllapp/hand-landmarker-vue`:
-
-```ts
-const modelHand = hand.value ? normalizeHandForModel(hand.value) : null;
-```
-
-The function reflects the left hand's horizontal image coordinates and preserves
-the physical hand label. Keep using the original landmarks for the overlay.
-The model pipeline handles wrist centering and scaling.
-
-### Open a WebSocket session
-
-With the backend running, use a browser console on the local Vite page:
-
-```javascript
-const socket = new WebSocket('ws://127.0.0.1:8080/ws');
-socket.onmessage = (event) => console.log(JSON.parse(event.data));
-socket.onopen = () => socket.send(JSON.stringify({
-    type: 'create_session',
-    nickname: 'Ola',
-    selectedHand: 'RIGHT',
-}));
-```
-
-The server responds with `game_state` in `CREATED`, including a `sessionId`,
-player data and `positionId: null` for the camera check. After that response,
-send `socket.send(JSON.stringify({ type: 'start_game' }))` to start a 60-second
-round. The server returns `RUNNING` with the current letter, position, remaining
-time and score. Copy the current `positionId` into `hand_sample` and `no_hand`.
-
-The server sends `FINISHED` at the end of the round and saves the score to the
-ranking, including for disconnected players. By default, a never-started
-session expires five minutes after creation. After starting, a new socket can
-send `resume_session` with the `sessionId` while the game runs or for five
-minutes after the game deadline. A successful resume replaces the previous socket.
-See the [WebSocket reference](docs/api.md#websocket-transport) for complete
-messages, reconnect behavior, origin settings and optional acknowledgements.
-
-### Read the ranking
-
-With the backend running, request the top results:
-
-```sh
-curl "http://127.0.0.1:8080/api/ranking?limit=10"
-```
-
-The endpoint returns a JSON array of `rank`, `nickname` and `score`. It orders
-results by score descending, then by earlier finish time, with the session
-identifier as the final tie-breaker. An empty database returns `[]`.
-
-The default limit is 10. Values outside 1–100 and invalid input return `400` with a
-`ProblemDetail` body. See the [API reference](docs/api.md) for response examples.
-
-### Keep saved results
-
-The backend creates `data/sllapp.db` relative to its working directory. With the
-startup commands above, that file is `backend/data/sllapp.db`. Set `DATA_DIR` to
-choose another storage directory. Keep the database file between runs to retain
-saved results.
-
-## Repository structure
-
-| Path | Contents |
+| Panel | Start |
 | --- | --- |
-| `backend/` | Java game engine, Spring Boot application, WebSocket sessions, ranking API and SQLite storage |
-| `frontend/apps/web/` | Vue session test panel, WebSocket client and ranking API client |
-| `frontend/packages/hand-landmarker/` | MediaPipe tracker API and hand selection |
-| `frontend/packages/hand-landmarker-vue/` | Vue composable for the hand tracker |
-| `docs/` | API reference, backend architecture and project workflow |
-| `.github/workflows/ci.yml` | Backend, frontend and Python model checks |
+| [Game engine tester](docs/local-development.md#game-engine-tester) | `sh mvnw spring-boot:test-run -Dspring-boot.run.profiles=game-test` |
+| [Camera and WebSocket diagnostics](docs/local-development.md#recognition-diagnostics) | `sh mvnw -Precognition-test` |
+| [Recognition diagnostics with Python](docs/local-development.md#run-recognition-with-the-python-service) | `sh mvnw -Precognition-ai` |
 
-## Development and testing
-
-### Backend checks
-
-From `backend/`:
-
-```powershell
-.\mvnw.cmd -B verify
-```
-
-On Linux or macOS, use `sh mvnw -B verify`. The tests cover the game catalog,
-scoring and progression, timed WebSocket games and sample validation, SQLite
-persistence and ranking HTTP responses. Integration tests use random server
-ports, temporary databases and a controlled clock for game deadlines.
-
-To run only the standalone game tests from `backend/`, use
-`sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
-
-### Frontend commands
-
-Run these commands from `frontend/`:
-
-| Command | Action |
-| --- | --- |
-| `pnpm dev` | Start the development server |
-| `pnpm build` | Build the application and workspace libraries |
-| `pnpm typecheck` | Check TypeScript types across the workspace |
-| `pnpm test` | Run Vitest tests |
-| `pnpm format:check` | Check formatting with Prettier |
-| `pnpm format` | Apply Prettier formatting |
-
-Workspace libraries live in `packages/` and use `workspace:*` dependencies.
-Turborepo builds dependencies first and caches build output. In development,
-Vite and TypeScript resolve library exports to `src/` through the `development`
-condition; production builds use compiled `dist/` output.
-
-### Python model checks
-
-From the repository root, with a Python 3.13 virtual environment active, run:
-
-```sh
-python -m pip install -r model/requirements.txt
-python -m unittest discover -s model/tests -t . -v
-```
-
-The training, prediction and HTTP service tests use synthetic data. Tests
-that require the SPAS dataset are skipped when it is absent.
-[Model testing guide](model/README.md#run-the-tests)
-
-The [CI workflow](.github/workflows/ci.yml) runs the `backend`, `frontend` and
-`model` jobs on pull requests and pushes to `master`. The `model` job runs
-the Python test suite on Ubuntu with Python 3.13.
+For either recognition mode, run `pnpm setup:recognition` once from
+`frontend/`. [Automated checks](docs/local-development.md#automated-checks)
 
 ## Documentation and contributing
 
 | Document | Contents |
 | --- | --- |
-| [API reference](docs/api.md) | WebSocket messages, ranking requests, configuration and errors |
-| [Backend architecture](docs/backend-architecture.md) | Game engine, packages, session lifecycle, result storage and tests |
-| [Project workflow](docs/WORKFLOW.md) | Issues, branches, commits, validation and pull requests |
-
-Follow the project workflow when contributing. Changes reach `master` through
-pull requests; the project uses merge commits.
+| [Local development](docs/local-development.md) | Startup commands, ports, profiles and troubleshooting |
+| [API reference](docs/api.md) | WebSocket protocol and ranking endpoint |
+| [Frontend](docs/frontend.md) | Camera tracking, sample handling and workspace structure |
+| [Backend architecture](docs/backend-architecture.md) | Game engine, session lifecycle, prediction client and storage |
+| [AI model](model/README.md) | Model artifact, prediction service API, dataset and training |
+| [Project workflow](docs/WORKFLOW.md) | Issues, branches, commits and pull requests |
 
 ## License
 
-Distributed under the [MIT License](LICENSE). Copyright © 2026 PJATK{AI}.
+[MIT License](LICENSE) · Copyright © 2026 PJATK{AI}.
 
 <p align="right"><a href="#readme-top">Back to top ↑</a></p>

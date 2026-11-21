@@ -1,6 +1,7 @@
 # API reference
 
 The backend listens on `http://127.0.0.1:8080` by default.
+[Local startup](local-development.md) · [Frontend session client](frontend.md#session-client) · [Python prediction API](../model/README.md#prediction-service)
 
 ## WebSocket transport
 
@@ -170,7 +171,9 @@ are not restricted to 0–1. Extra hand fields, including nested fields, are
 retained in the latest accepted sample. Either handedness is accepted regardless
 of `selectedHand`. Tracker values `Left`/`Right` must be mapped to `LEFT`/`RIGHT`.
 
-This complete synthetic sample illustrates the format. `score` is optional:
+`score` and `coordinateSpace` are optional in the WebSocket sample. The
+[Python prediction API](../model/README.md#post-predict) requires
+`coordinateSpace: "MEDIAPIPE_IMAGE"` inside the `hand` object.
 
 ```json
 {
@@ -178,6 +181,7 @@ This complete synthetic sample illustrates the format. `score` is optional:
   "seq": 0,
   "positionId": null,
   "hand": {
+    "coordinateSpace": "MEDIAPIPE_IMAGE",
     "handedness": "RIGHT",
     "score": 0.95,
     "landmarks": [
@@ -272,15 +276,27 @@ open so the client can correct its request:
 | `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples |
 | `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
 
-For example, enable acknowledgements when starting the backend from `backend/`:
+Use Spring Boot command-line properties or environment variables such as
+`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true`.
+[Enable WebSocket acknowledgements](local-development.md#enable-websocket-acknowledgements)
 
-```powershell
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--sllapp.websocket.diagnostic-mode=true"
+### Try the session protocol
+
+With the backend and Vite running, open the browser console on the local app.
+
+```js
+const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+socket.onmessage = ({ data }) => console.log(JSON.parse(data));
+socket.onopen = () => socket.send(JSON.stringify({
+    type: 'create_session',
+    nickname: 'Ola',
+    selectedHand: 'RIGHT',
+}));
 ```
 
-The session cleanup task runs every second. Configuration can also be supplied
-through Spring Boot command-line properties or environment variables, for example
-`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true`.
+After the server reports `CREATED`, send
+`socket.send(JSON.stringify({ type: 'start_game' }))` and look for `RUNNING`.
+Use the latest `positionId` when sending samples during the game.
 
 ## Read the ranking
 
@@ -320,34 +336,3 @@ with `Content-Type: application/problem+json`. For example, `?limit=101` returns
   "instance": "/api/ranking"
 }
 ```
-
-## Frontend session client
-
-`useGameSession` in `frontend/apps/web/src/composables/game-session/` owns one
-WebSocket connection. Configure its URL through `VITE_WS_URL` or the `url`
-option; `timeoutMs` overrides the default 10000 ms operation timeout.
-It exposes readonly connection status, pending action, readiness, the latest
-validated game state, errors, closure information and sample diagnostics.
-
-Call `createSession({ nickname, selectedHand })`, `disconnect()` and `reconnect()`
-for session lifecycle. `sendHandSample(hand)` and `sendNoHand()` add the current
-`positionId` and a shared sequence starting at zero. A true result means that
-`WebSocket.send` accepted the message, not that the server acknowledged it.
-Samples are discarded while unconfirmed, disconnected or when the socket already
-has buffered data; there is no application queue. Sample acknowledgements do not
-control sending. Hand payloads use protocol `LEFT`/`RIGHT` and retain extra fields;
-the client does not mirror, scale or otherwise transform coordinates.
-
-For classifiers that expect right-hand image landmarks, the frontend
-`normalizeHandForModel` helper prepares the 21 original tracker points.
-It applies `x = 1 - x` to the left hand and keeps the right hand's coordinates
-as detected. It preserves point order, y, z, confidence and physical handedness.
-When sending these prepared points, keep the physical label (`LEFT` or `RIGHT`).
-The backend must pass the points to the classifier without a second reflection.
-The model pipeline handles wrist centering and scaling. The helper is available
-for callers to invoke before sending. The session client sends the points it receives.
-
-The composable releases listeners, timers and the socket when its Vue scope is
-disposed, or when `dispose()` is called. Events from replaced sockets cannot
-change the current state. Session data is held only in memory. The current
-frontend camera panel uses the `CREATED` state with explicit `positionId: null`.

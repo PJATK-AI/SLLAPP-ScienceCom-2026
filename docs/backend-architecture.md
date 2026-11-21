@@ -5,7 +5,7 @@ spelling game engine, manages player sessions over WebSocket and validates
 hand samples. Game results are stored in SQLite and exposed through a ranking
 REST API.
 
-See the [README](../README.md) for local setup and commands.
+See [Local development](local-development.md) for commands, ports and test profiles.
 
 ## Standalone game engine
 
@@ -96,7 +96,7 @@ The preview starts a 60-second round with `GameRules.defaults()`,
 **Complete letter** action passes the displayed position ID to the engine,
 simulating a recognized sign. The test profile stores its SQLite database
 under `target/game-test-data`. See the
-[README startup instructions](../README.md#open-the-game-engine-tester).
+[tester startup instructions](local-development.md#game-engine-tester).
 
 ## WebSocket transport
 
@@ -182,11 +182,11 @@ the response body. Prediction requests have no application-level retries.
 The client sends the `hand` object unchanged to `POST /predict` as UTF-8 JSON with
 an explicit byte-count `Content-Length`. The Python service requires
 `coordinateSpace: "MEDIAPIPE_IMAGE"`, physical `handedness` and 21 image landmarks.
-The caller supplies the coordinate space, which the current camera stream omits.
+The recognition diagnostics panel supplies the coordinate space on its camera samples.
 The result is a prediction only for HTTP 200 with a supported uppercase letter
-and numeric confidence from 0 to 1, inclusive. Gameplay callers can use the
-prediction once they have selected a sample. Session acceptance and scoring are
-separate operations.
+and numeric confidence from 0 to 1, inclusive. The diagnostics endpoint exposes
+the result. The regular `/ws` endpoint validates samples and provides the game
+lifecycle. Position progression uses the server-side completion method.
 
 | Failure | Cause |
 | --- | --- |
@@ -219,145 +219,43 @@ When enabled, it calls `GET /health` once after backend startup and logs the
 model variant, classifier, 16 letters and artifact SHA-256. A failed health
 check logs a warning and the application continues to run. See the
 [Python service contract](../model/README.md#prediction-service) and
-[backend startup example](../README.md#connect-the-prediction-service).
+[local AI startup](local-development.md#run-recognition-with-the-python-service).
+
+### Camera recognition diagnostics
+
+The local `recognition-test` profile uses the test classpath and binds to
+`127.0.0.1:8082` by default. The `recognition-ai` Maven shortcut activates
+the same panel with prediction enabled and a default service URL of
+`http://127.0.0.1:8000`. Its page uses the same frontend hand tracker
+and normalization as the camera preview. It sends `hand_sample` and
+`no_hand` with `positionId: null` to a dedicated WebSocket at
+`/recognition-test/ws`. The endpoint uses the existing sample validator.
+It acknowledges accepted samples and reports skips for absent hands, repeated
+sequences and occupied prediction capacity.
+
+The diagnostic instance of `AiPredictionClient` records the HTTP request body
+and the bytes read by the client, with up to 8192 bytes of response displayed.
+Each result carries the sample sequence, elapsed time and either the decoded
+prediction or the failure. One prediction runs at a time across the diagnostic
+connections to keep each trace associated with its sample. The diagnostic
+endpoint has no game lifecycle. See the [local startup instructions](local-development.md#recognition-diagnostics).
 
 ## Code structure
 
-`game` owns the standalone game rules and state. `web` owns the REST and
-WebSocket protocols. `service` manages game sessions and ranks results. Each
-class in `service` uses `@Service` and has a name ending in
-`Service`. `moderation` contains the nickname rules and the blocked-word list.
-`model` contains the application data types, and `repository` implements the SQL
-queries. WebSocket message records live in `web.websocket.message`, REST DTOs in
-`web.rest.dto`.
-
-`config` groups Spring configuration and runtime settings by area.
+Production classes live under `backend/src/main/java/pl/pjatk/ai/sllapp/`.
+The local test panels use the test classpath.
 
 | Package | Responsibility |
 | --- | --- |
-| `config.ai` | Prediction client settings and Spring bean |
-| `config.application` | UTC clock and scheduling |
-| `config.moderation` | Blocked-word resource location |
-| `config.session` | Player session lifetime |
-| `config.storage` | SQLite data source and storage directory |
-| `config.web` | REST CORS, WebSocket endpoint and message limits |
-
-```text
-backend/src/
-├── main/
-│   ├── java/pl/pjatk/ai/sllapp/
-│   │   ├── SllappApplication.java
-│   │   ├── ai/
-│   │   │   ├── AiPredictionClient.java
-│   │   │   └── PredictionResult.java
-│   │   ├── config/
-│   │   │   ├── ai/
-│   │   │   │   ├── AiConfiguration.java
-│   │   │   │   └── AiProperties.java
-│   │   │   ├── application/
-│   │   │   │   ├── ClockConfiguration.java
-│   │   │   │   └── SchedulingConfiguration.java
-│   │   │   ├── moderation/
-│   │   │   │   ├── ModerationConfiguration.java
-│   │   │   │   └── ModerationProperties.java
-│   │   │   ├── session/
-│   │   │   │   ├── SessionConfiguration.java
-│   │   │   │   └── SessionProperties.java
-│   │   │   ├── storage/
-│   │   │   │   ├── SqliteConfiguration.java
-│   │   │   │   └── StorageProperties.java
-│   │   │   └── web/
-│   │   │       ├── SessionWebSocketConfiguration.java
-│   │   │       ├── SessionWebSocketProperties.java
-│   │   │       ├── WebConfiguration.java
-│   │   │       └── WebProperties.java
-│   │   ├── game/
-│   │   │   ├── GameEngine.java
-│   │   │   ├── GameRules.java
-│   │   │   ├── GameState.java
-│   │   │   ├── RandomWordPicker.java
-│   │   │   ├── WordCatalog.java
-│   │   │   └── WordPicker.java
-│   │   ├── model/
-│   │   │   ├── GameResult.java
-│   │   │   ├── GameSession.java
-│   │   │   ├── RankingEntry.java
-│   │   │   └── SelectedHand.java
-│   │   ├── moderation/
-│   │   │   ├── BlockedWordList.java
-│   │   │   └── NicknamePolicy.java
-│   │   ├── repository/
-│   │   │   └── GameResultRepository.java
-│   │   ├── service/
-│   │   │   ├── RankingService.java
-│   │   │   └── SessionService.java
-│   │   └── web/
-│   │       ├── rest/
-│   │       │   ├── RankingController.java
-│   │       │   └── dto/
-│   │       │       └── RankingEntryResponse.java
-│   │       └── websocket/
-│   │           ├── message/
-│   │           │   ├── ErrorMessage.java
-│   │           │   ├── GameStateMessage.java
-│   │           │   ├── SampleAckMessage.java
-│   │           │   └── SampleMessage.java
-│   │           ├── SampleMessageValidator.java
-│   │           ├── SessionConnection.java
-│   │           ├── SessionConnectionRegistry.java
-│   │           └── SessionWebSocketHandler.java
-│   └── resources/
-│       ├── application.yml
-│       ├── game/
-│       │   └── words.txt
-│       ├── moderation/
-│       │   ├── blocked-words.txt
-│       │   ├── LICENSE-LDNOOBW.txt
-│       │   └── SOURCES.md
-│       └── schema.sql
-└── test/
-    ├── java/pl/pjatk/ai/sllapp/
-    │   ├── game/
-    │   │   ├── GameEngineTest.java
-    │   │   ├── GameRulesTest.java
-    │   │   ├── RandomWordPickerTest.java
-    │   │   └── WordCatalogTest.java
-    │   ├── moderation/
-    │   │   ├── BlockedWordListTest.java
-    │   │   └── NicknamePolicyTest.java
-    │   ├── repository/
-    │   │   └── GameResultRepositoryTest.java
-    │   ├── service/
-    │   │   └── SessionServiceTest.java
-    │   ├── support/
-    │   │   └── MutableClock.java
-    │   └── web/
-    │       ├── rest/
-    │       │   └── RankingControllerTest.java
-    │       └── websocket/
-    │           ├── SampleFixtures.java
-    │           ├── SampleMessageValidatorTest.java
-    │           ├── SessionExpiryTest.java
-    │           ├── SessionGameTest.java
-    │           ├── SessionOwnershipTest.java
-    │           ├── SessionSamplesTest.java
-    │           ├── SessionWebSocketTest.java
-    │           ├── WebSocketSizeTest.java
-    │           └── WebSocketTestClient.java
-    └── resources/
-        └── moderation/
-            └── test-blocked-words.txt
-```
-
-| File | Responsibility |
-| --- | --- |
-| [`SllappApplication.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/SllappApplication.java) | Spring Boot entry point |
-| [`GameResult.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/model/GameResult.java) | Immutable result record |
-| [`GameResultRepository.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/repository/GameResultRepository.java) | SQL operations through `JdbcTemplate` and row mapping |
-| [`SqliteConfiguration.java`](../backend/src/main/java/pl/pjatk/ai/sllapp/config/storage/SqliteConfiguration.java) | Storage directory creation and SQLite `DataSource` |
-| [`application.yml`](../backend/src/main/resources/application.yml) | Server, storage and schema initialization settings |
-| [`schema.sql`](../backend/src/main/resources/schema.sql) | Result table and ranking index |
-| [`blocked-words.txt`](../backend/src/main/resources/moderation/blocked-words.txt) | Default blocked-word list; source and license in [`SOURCES.md`](../backend/src/main/resources/moderation/SOURCES.md) |
+| `game` | Game state, scoring, word catalog and picker |
+| `model` | Sessions, results and ranking entries |
+| `service` | Session lifecycle and ranking queries |
+| `web.websocket` | Session protocol, validation and socket ownership |
+| `web.rest` | Ranking endpoint and REST response types |
+| `ai` | Asynchronous client and typed prediction results |
+| `moderation` | Nickname policy and blocked words |
+| `repository` | SQLite queries through Spring JDBC |
+| `config` | Spring bindings for AI, clock, scheduling, moderation, sessions, storage and web |
 
 ## Startup and configuration
 
@@ -431,50 +329,14 @@ row limit as a bound SQL parameter. A limit below 1 causes
 
 ## Test coverage and CI
 
-The game tests use fixed instants and controlled word picks without a Spring
-context. They check the bundled catalog, word pool refill, scoring, position
-progression, expiry and repeated letters. Run them from `backend/` with
-`sh mvnw -B '-Dtest=pl.pjatk.ai.sllapp.game.*Test' test`.
+| Area | Coverage |
+| --- | --- |
+| Game engine | Catalog validation, pool refill, scoring, position changes, expiry and repeated letters |
+| Session and WebSocket | Creation, start and resume, connection replacement, input validation, deadlines and result persistence |
+| Prediction client | HTTP contract, connection reuse, timeouts, executor saturation and graceful startup when the service is unavailable |
+| Test panels | Profile isolation, simulated game completion and diagnostics with successful, failed, malformed and unavailable AI responses |
+| Ranking and storage | Ordering and limits, error responses, duplicate inserts, persistence after restart and nanosecond precision |
 
-The prediction tests use `MockRestServiceServer` for request and response
-validation. A local HTTP server checks the wire byte count, connection reuse,
-asynchronous execution, executor saturation and timeouts in both the header
-and body phases. Startup tests verify settings, metadata and graceful operation
-when health checks fail.
-
-The WebSocket tests cover creation, nickname validation, resuming, concurrent
-ownership changes, delayed close callbacks, expiry with a controlled clock,
-sample validation, sequence ordering, optional acknowledgements, CORS/preflight,
-UTF-8 size boundaries, fragmented text and oversized binary messages.
-`SessionGameTest` uses a deterministic picker and a controlled clock to check
-start, completion, state-specific samples, scheduled finish, resume, ranking
-and persistence retries after expiry. `SessionOwnershipTest` checks concurrent
-start and persistence after a socket send failure.
-`BlockedWordListTest` checks loading of the blocked-word file: comments, BOM,
-duplicates, NFKC normalization, the bundled list, and startup errors for missing,
-unreadable, malformed, empty or invalid files and directories. Other session
-tests use the small list in `test-blocked-words.txt`. Integration
-tests use a real embedded server on random ports and temporary SQLite files.
-
-`RankingControllerTest` starts the HTTP server on a random port with a temporary SQLite
-database. It checks the empty response, output fields, score and timestamp
-ordering, full ties, rank numbering, default and explicit limits, and invalid
-parameters with `ProblemDetail` responses.
-
-[`GameResultRepositoryTest`](../backend/src/test/java/pl/pjatk/ai/sllapp/repository/GameResultRepositoryTest.java)
-starts application contexts against a temporary SQLite file. It checks:
-
-- Result persistence after closing and restarting the application context.
-- Preservation of the original result after a duplicate-session save.
-- Score ordering and finish-time tie-breaking, including nanosecond precision.
-- Limiting the number of returned results.
-
-Run the backend checks from `backend/`:
-
-```powershell
-.\mvnw.cmd -B verify
-```
-
-On Linux or macOS, use `sh mvnw -B verify`.
-The [CI workflow](../.github/workflows/ci.yml) runs that command with JDK 21 on
-Ubuntu for pull requests and pushes to `master`.
+The engine tests control time and word selection. The integration tests start
+embedded servers on random ports and use temporary SQLite files.
+[Run the automated checks](local-development.md#automated-checks)
