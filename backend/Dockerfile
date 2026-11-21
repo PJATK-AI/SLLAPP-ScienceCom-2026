@@ -10,7 +10,8 @@ COPY mvnw pom.xml ./
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.m2 sh mvnw -B -DskipTests package
 
-FROM eclipse-temurin:21-jre-noble
+# The game uses L32X64MixRandom from the jdk.random module.
+FROM eclipse-temurin:21-jdk-noble
 WORKDIR /app
 
 RUN apt-get update \
