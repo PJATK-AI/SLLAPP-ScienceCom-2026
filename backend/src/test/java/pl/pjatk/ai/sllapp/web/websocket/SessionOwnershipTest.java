@@ -16,7 +16,9 @@ import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import pl.pjatk.ai.sllapp.ai.AiPredictionClient;
 import pl.pjatk.ai.sllapp.config.moderation.ModerationProperties;
+import pl.pjatk.ai.sllapp.config.session.RecognitionProperties;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
 import pl.pjatk.ai.sllapp.model.GameResult;
@@ -46,7 +48,9 @@ class SessionOwnershipTest {
             new NicknamePolicy(new BlockedWordList(
                     new ModerationProperties("classpath:moderation/test-blocked-words.txt"),
                     new DefaultResourceLoader())), () -> length -> "A".repeat(length), results);
-    private final SessionConnectionRegistry connections = new SessionConnectionRegistry(sessions, mapper, clock);
+    private final SessionConnectionRegistry connections = new SessionConnectionRegistry(sessions, mapper, clock,
+            mock(AiPredictionClient.class), new RecognitionProperties(0.8, 3, Duration.ofMillis(350), 2),
+            Duration.ofMillis(250), System::nanoTime);
     private final SessionWebSocketHandler handler = new SessionWebSocketHandler(mapper,
             new SessionWebSocketProperties(65536, 262144, true), sessions, new SampleMessageValidator(),
             connections, clock);

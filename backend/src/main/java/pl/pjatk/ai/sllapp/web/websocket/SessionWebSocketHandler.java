@@ -13,6 +13,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
 import pl.pjatk.ai.sllapp.model.GameSession;
+import pl.pjatk.ai.sllapp.model.LetterRecognition.Attempt;
 import pl.pjatk.ai.sllapp.model.SelectedHand;
 import pl.pjatk.ai.sllapp.service.SessionService;
 import pl.pjatk.ai.sllapp.web.websocket.message.ErrorMessage;
@@ -111,6 +112,8 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
             error(connection.socket, "SESSION_REQUIRED", "Create or resume a session first.");
             return;
         }
+        SampleMessage sample;
+        Attempt attempt;
         synchronized (game) {
             var now = clock.instant();
             if (!connections.checkActive(game, connection, now)) return;
@@ -119,7 +122,6 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
                 return;
             }
             var state = game.state(now);
-            SampleMessage sample;
             try {
                 Long activePositionId = state == null ? null : state.positionId();
                 sample = samples.validate(input, activePositionId);
@@ -127,10 +129,20 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
                 error(connection.socket, "INVALID_SAMPLE", exception.getMessage());
                 return;
             }
-            if (connection.acceptSample(sample) && properties.diagnosticMode()) {
-                connection.send(SampleAckMessage.of(sample.seq()));
+            if (!connection.acceptSample(sample)) return;
+            long sampleNanos = connections.sampleTime();
+            if (properties.diagnosticMode()) {
+                try {
+                    connection.send(SampleAckMessage.of(sample.seq()));
+                } catch (IOException | RuntimeException exception) {
+                    connections.closeAfterTransportError(connection.socket.getId());
+                    throw exception;
+                }
             }
+            if (state == null) return;
+            attempt = connections.acceptGameSample(game, sample, now, sampleNanos);
         }
+        if (attempt != null) connections.predict(game, connection, sample, attempt);
     }
 
     private void create(SessionConnection connection, JsonNode input) throws IOException {

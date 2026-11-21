@@ -24,6 +24,7 @@ public record GameStateMessage(String type, UUID sessionId, String status, Strin
         }
         return new GameStateMessage("game_state", session.sessionId(), "RUNNING", session.nickname(),
                 session.selectedHand(), state.positionId(), state.word(), state.letterIndex(),
-                String.valueOf(state.expectedLetter()), state.remainingMs(), state.score(), state.repeatsPreviousLetter());
+                String.valueOf(state.expectedLetter()), state.remainingMs(), state.score(),
+                session.recognition().requiresRelease());
     }
 }
