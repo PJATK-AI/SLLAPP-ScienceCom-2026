@@ -12,6 +12,7 @@
   <p>
     <a href="#quick-start">Quick start</a> ·
     <a href="#prediction-service">Start the model</a> ·
+    <a href="#vue-round-diagnostics">Vue diagnostics</a> ·
     <a href="#local-tools">Local tools</a>
   </p>
   <p>
@@ -74,21 +75,48 @@ a repeated letter. [Recognition rules and settings](docs/api.md#letter-recogniti
 
 ## Local tools
 
-For the Vue game with live WebSocket and prediction details, use
-`pnpm dev:diagnostics` from `frontend/` with
-[backend diagnostics enabled](docs/local-development.md#vue-round-diagnostics).
+### Vue round diagnostics
 
-Run the panel commands from `backend/`. On Windows, use `.\mvnw.cmd` in place
-of `sh mvnw`.
+Start here to test the game in the browser. The **Diagnostyka** panel shows
+WebSocket messages, sample acknowledgements and live predictions during a round.
 
-| Panel | Start |
-| --- | --- |
-| [Game engine tester](docs/local-development.md#game-engine-tester) | `sh mvnw -Pgame-test` |
-| [Camera and WebSocket diagnostics](docs/local-development.md#recognition-diagnostics) | `sh mvnw -Precognition-test` |
-| [Recognition diagnostics with Python](docs/local-development.md#run-recognition-with-the-python-service) | `sh mvnw -Precognition-ai` |
+Run this from the repository root. Use `pnpm setup:local` first if the frontend
+hasn't been set up yet.
 
-For either recognition mode, run `pnpm setup:recognition` once from
-`frontend/`. [Automated checks](docs/local-development.md#automated-checks)
+```sh
+cd frontend
+pnpm dev:diagnostics
+```
+
+- **Check WebSocket transport.** Enable diagnostics on the regular backend
+  and create a session. With the camera off, click **Wyślij testową dłoń**
+  and **Wyślij brak dłoni**. Look for a `sample_ack` with the same `seq`
+  as each sample.
+- **Play a round with live predictions.** Run the Python service and enable
+  prediction on the backend. Start the camera and a round, then sign the
+  highlighted letter. Check the predicted letter, confidence and game
+  decision in the panel.
+
+[Setup commands and expected results](docs/local-development.md#vue-round-diagnostics)
+
+### Backend test panels
+
+Run these commands from `backend/`. On Windows, use `.\mvnw.cmd` in place of
+`sh mvnw`. For either recognition panel mode, first run
+`pnpm setup:recognition` from `frontend/`.
+
+| Panel | Start | What to check |
+| --- | --- | --- |
+| [Game engine tester](docs/local-development.md#game-engine-tester) | `sh mvnw -Pgame-test` | Simulate letter completions and check the timer, letter progression and score. |
+| [Camera and WebSocket diagnostics](docs/local-development.md#recognition-diagnostics) | `sh mvnw -Precognition-test` | Check hand tracking and inspect the WebSocket JSON with AI disabled. |
+| [Recognition diagnostics with Python](docs/local-development.md#run-recognition-with-the-python-service) | `sh mvnw -Precognition-ai` | Inspect Java's HTTP requests to Python, responses, predicted letters and confidence. Start Python first. |
+
+### Automated checks
+
+From `frontend/`, run `pnpm test` to run Vitest across the workspace. The
+tests cover the Vue game, WebSocket sessions, ranking and hand tracking.
+
+[Full CI commands for the frontend, backend and Python](docs/local-development.md#automated-checks)
 
 ## Documentation and contributing
 
