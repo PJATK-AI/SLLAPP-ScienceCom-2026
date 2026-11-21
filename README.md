@@ -24,19 +24,38 @@
 
 ## Quick start
 
+### Play with Docker Compose
+
+With Docker running, run this from the repository root:
+
+```sh
+docker compose up
+```
+
+Open [the game](http://127.0.0.1:8088) and allow camera access. Compose builds
+and starts the game, backend and prediction service. The first build needs
+internet access for base images, dependencies and the MediaPipe hand tracker.
+The classifier comes from `model/artifacts/model.joblib` in the checkout.
+
+After changing code, run `docker compose up --build`. To stop the stack, run
+`docker compose down` from another terminal. Rankings are stored in the named
+`ranking` volume and survive `down`. [Compose setup and troubleshooting](docs/local-development.md#docker-compose)
+
+### Run from source
+
 **Requirements** · JDK 21 · Node.js 24.15+ · pnpm 12.21.0
 
 Run each block from the repository root in its own terminal.
 [PowerShell quick start](docs/local-development.md#windows-quick-start)
 
-### Backend · terminal 1
+#### Backend · terminal 1
 
 ```sh
 cd backend
 sh mvnw spring-boot:run
 ```
 
-### Frontend · terminal 2
+#### Frontend · terminal 2
 
 ```sh
 cd frontend

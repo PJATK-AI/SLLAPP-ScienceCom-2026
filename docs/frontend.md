@@ -73,6 +73,12 @@ it reads `VITE_WS_URL` and allows 10 seconds each for opening the connection and
 receiving confirmation of a session or a round start. It exposes connection
 status, readiness, the latest validated state and errors.
 
+The [Compose frontend](local-development.md#docker-compose) is built with
+`VITE_WS_URL=/ws` and `VITE_API_BASE_URL=/api`. A WebSocket path beginning
+with a single slash uses the page's host and port. It connects using `ws://`
+from an HTTP page and `wss://` from an HTTPS page. For source development,
+use an absolute URL such as `ws://127.0.0.1:8080/ws`.
+
 `createSession({ nickname, selectedHand })` opens a session. `startGame()`
 sends one request and waits for the server to confirm the round. `reconnect()`
 opens a new socket and waits for the current server state. Both sample types

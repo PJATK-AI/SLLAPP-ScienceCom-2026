@@ -1,13 +1,15 @@
 # Local development
 
-Use the [README quick start](../README.md#quick-start) for the browser app and
-backend on macOS or Linux. Use [Vue round diagnostics](#vue-round-diagnostics)
+Use [Docker Compose](#docker-compose) to play the game or the [README source
+setup](../README.md#run-from-source) to develop it on macOS or Linux.
+Use [Vue round diagnostics](#vue-round-diagnostics)
 to test gameplay in the browser, or use the standalone panels below to check
 the game engine or inspect prediction requests. Start each server in its own
 terminal from the repository root.
 
 | Address | Process | Requirements |
 | --- | --- | --- |
+| [127.0.0.1:8088](http://127.0.0.1:8088) | Game with prediction via Compose | Docker with Compose |
 | [127.0.0.1:5173](http://127.0.0.1:5173) | Vue fingerspelling game | Backend on port 8080, Node.js and pnpm |
 | [127.0.0.1:8080/api/ranking](http://127.0.0.1:8080/api/ranking) | Spring Boot backend | JDK 21 |
 | [127.0.0.1:8081/game-test](http://127.0.0.1:8081/game-test) | Game engine tester | JDK 21 |
@@ -17,6 +19,27 @@ terminal from the repository root.
 Check your versions with `java -version`, `node --version` and `pnpm --version`.
 The project uses JDK 21, Node.js 24.15 or newer and pnpm 12.21.0. If pnpm is
 missing, install the workspace version with `npm install --global pnpm@12.21.0`.
+
+## Docker Compose
+
+Start Docker, then run `docker compose up` from the repository root. The
+first build downloads base images, build dependencies and MediaPipe assets.
+Compose builds a separate image for each of the three services. Only the
+frontend publishes a port on the host. Open [the game](http://127.0.0.1:8088)
+and follow [play a round](frontend.md#play-a-round).
+
+Nginx serves the game and forwards `/api/` and `/ws` to Spring Boot. The
+backend calls the Python service over the Compose network. The classifier at
+`model/artifacts/model.joblib` is mounted read-only into the model container.
+Check `docker compose ps` and `docker compose logs` if startup fails. If the
+model mount is missing, check that the classifier file is present in your
+checkout. If port `8088` is in use, free it before starting this stack.
+
+Run `docker compose up --build` after changing source or build settings. To
+stop and remove the containers, use `docker compose down`. The named
+`ranking` volume holds `/data/sllapp.db` and is reused on the next start
+with the same Compose project name. `docker compose down -v` also deletes
+that volume and its saved scores.
 
 ## Windows quick start
 
