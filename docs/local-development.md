@@ -8,7 +8,7 @@ set of commands.
 
 | Address | Process | Requirements |
 | --- | --- | --- |
-| [127.0.0.1:5173](http://127.0.0.1:5173) | Vue camera and session panel | Backend on port 8080, Node.js and pnpm |
+| [127.0.0.1:5173](http://127.0.0.1:5173) | Vue fingerspelling game | Backend on port 8080, Node.js and pnpm |
 | [127.0.0.1:8080/api/ranking](http://127.0.0.1:8080/api/ranking) | Spring Boot backend | JDK 21 |
 | [127.0.0.1:8081/game-test](http://127.0.0.1:8081/game-test) | Game engine tester | JDK 21 |
 | [127.0.0.1:8082/recognition-test](http://127.0.0.1:8082/recognition-test) | Camera and AI diagnostics | JDK 21, prepared frontend assets, Python only for letter predictions |
@@ -40,8 +40,8 @@ Run `pnpm setup:local` on first setup. It installs dependencies, creates
 Use `pnpm dev` for subsequent starts.
 
 Open [the app](http://127.0.0.1:5173) and [the ranking API](http://127.0.0.1:8080/api/ranking)
-to check both processes. See [the frontend camera walkthrough](frontend.md#camera-and-session-panel)
-for a sample test.
+to check both processes. Then [enable prediction on the regular backend](#enable-prediction-on-the-regular-backend)
+and follow [play a round](frontend.md#play-a-round).
 
 ## Game engine tester
 
@@ -61,6 +61,29 @@ Open [the game tester](http://127.0.0.1:8081/game-test). Click **Start game**
 and **Complete letter** to exercise the timer, position and scoring using
 simulated completions. Each test round starts with a 60-second timer.
 [Game engine behavior](backend-architecture.md#standalone-game-engine)
+
+## Vue round diagnostics
+
+Start Python as described under [recognition with the Python service](#run-recognition-with-the-python-service).
+To play a round and inspect its predictions, set
+`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true` when starting the regular backend
+with prediction enabled. For example, from `backend/` on macOS or Linux:
+
+```sh
+SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 sh mvnw spring-boot:run
+```
+
+In PowerShell, set `$env:SLLAPP_WEBSOCKET_DIAGNOSTICMODE = 'true'` alongside
+the [regular backend settings](#enable-prediction-on-the-regular-backend).
+From `frontend/`, start the diagnostics variant of the app:
+
+```sh
+pnpm dev:diagnostics
+```
+
+Open [the game](http://127.0.0.1:5173). **Diagnostyka** opens to the right of
+the camera. The columns stack below 288 CSS pixels. For raw Java-to-Python
+HTTP bodies, use the separately launched [recognition panel](#recognition-diagnostics).
 
 ## Recognition diagnostics
 

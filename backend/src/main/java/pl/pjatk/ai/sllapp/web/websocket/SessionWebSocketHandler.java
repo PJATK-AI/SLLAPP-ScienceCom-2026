@@ -11,6 +11,7 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
+import org.springframework.web.util.UriComponentsBuilder;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
 import pl.pjatk.ai.sllapp.model.GameSession;
 import pl.pjatk.ai.sllapp.model.LetterRecognition.Attempt;
@@ -48,7 +49,10 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        connections.register(session);
+        var uri = session.getUri();
+        boolean predictionDiagnostics = properties.diagnosticMode() && uri != null && "1".equals(
+                UriComponentsBuilder.fromUri(uri).build().getQueryParams().getFirst("diagnostics"));
+        connections.register(session, predictionDiagnostics);
     }
 
     @Override

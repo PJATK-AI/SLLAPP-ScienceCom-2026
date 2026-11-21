@@ -35,13 +35,32 @@ const state = {
     selectedHand: 'RIGHT',
     positionId: null,
 };
+const running = {
+    ...state,
+    status: 'RUNNING',
+    positionId: 1,
+    word: 'LAS',
+    letterIndex: 0,
+    expectedLetter: 'L',
+    remainingMs: 59000,
+    score: 0,
+    requiresRelease: false,
+};
+const finished = { ...state, status: 'FINISHED', remainingMs: 0, score: 10 };
+const hand = {
+    handedness: 'RIGHT' as const,
+    coordinateSpace: 'MEDIAPIPE_IMAGE' as const,
+    landmarks: Array.from({ length: 21 }, () => ({ x: 1, y: 2, z: 3 })),
+};
 const scopes: ReturnType<typeof effectScope>[] = [];
-function setup() {
+function setup(diagnostics = false) {
     vi.stubGlobal('WebSocket', Socket);
     vi.useFakeTimers();
     const scope = effectScope();
     scopes.push(scope);
-    const client = scope.run(() => useGameSession({ url: 'ws://localhost/ws', timeoutMs: 100 }))!;
+    const client = scope.run(() =>
+        useGameSession({ url: 'ws://localhost/ws', timeoutMs: 100, diagnostics }),
+    )!;
     client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
     return { client, socket: Socket.all.at(-1)!, scope };
 }
@@ -61,10 +80,7 @@ it('waits for open and confirmation; prevents duplicates and shares sequence', (
     expect(client.isReady.value).toBe(false);
     socket.message(state);
     client.sendNoHand();
-    client.sendHandSample({
-        handedness: 'RIGHT',
-        landmarks: Array.from({ length: 21 }, () => ({ x: 1, y: 2, z: 3 })),
-    });
+    client.sendHandSample(hand);
     expect(socket.send.mock.calls.slice(1).map((c) => JSON.parse(c[0]))).toMatchObject([
         { type: 'no_hand', seq: 0, positionId: null },
         { type: 'hand_sample', seq: 1, positionId: null },
@@ -72,6 +88,66 @@ it('waits for open and confirmation; prevents duplicates and shares sequence', (
     socket.message(state);
     client.sendNoHand();
     expect(client.lastSentSeq.value).toBe(2);
+});
+it('sends one start request and uses the latest position for both samples', () => {
+    const { client, socket } = setup();
+    socket.open();
+    expect(client.startGame()).toBe(false);
+    socket.message(state);
+    expect(client.startGame()).toBe(true);
+    expect(client.startGame()).toBe(false);
+    socket.message({ type: 'sample_ack', seq: 0 });
+    socket.message({ type: 'error', code: 'INVALID_SAMPLE', message: 'Old position' });
+    expect(client.pendingAction.value).toBe('start');
+    expect(client.sendNoHand()).toBe(false);
+    socket.message(running);
+    expect(client.pendingAction.value).toBeNull();
+    expect(client.startGame()).toBe(false);
+    expect(client.sendHandSample(hand)).toBe(true);
+    const nextPosition = { ...running, positionId: 2, letterIndex: 1, expectedLetter: 'A' };
+    socket.message(nextPosition);
+    expect(client.sendNoHand()).toBe(true);
+    expect(socket.send.mock.calls.slice(1).map(([payload]) => JSON.parse(payload))).toMatchObject([
+        { type: 'start_game' },
+        { type: 'hand_sample', seq: 0, positionId: 1 },
+        { type: 'no_hand', seq: 1, positionId: 2 },
+    ]);
+    socket.message(finished);
+    expect(client.sendNoHand()).toBe(false);
+    socket.end(1008);
+    expect(client.gameState.value).toEqual(finished);
+});
+
+it.each([running, finished])('recovers an uncertain start as $status', (stateAfterResume) => {
+    const { client, socket } = setup();
+    socket.open();
+    socket.message(state);
+    client.startGame();
+    vi.advanceTimersByTime(100);
+    expect(client.isReady.value).toBe(false);
+    expect(client.error.value?.code).toBe('TIMEOUT');
+    expect(client.startGame()).toBe(false);
+    client.reconnect();
+    const next = Socket.all.at(-1)!;
+    next.open();
+    expect(client.sendNoHand()).toBe(false);
+    next.message(stateAfterResume);
+    expect(client.gameState.value).toEqual(stateAfterResume);
+    if (stateAfterResume === running) {
+        expect(client.sendNoHand()).toBe(true);
+        expect(JSON.parse(next.send.mock.calls[1]![0])).toEqual({
+            type: 'no_hand',
+            positionId: 1,
+            seq: 0,
+        });
+    } else {
+        expect(client.sendNoHand()).toBe(false);
+    }
+    client.resetSession();
+    expect(client.gameState.value).toBeNull();
+    expect(next.close).toHaveBeenCalled();
+    client.createSession({ nickname: 'New', selectedHand: 'LEFT' });
+    expect(Socket.all).toHaveLength(3);
 });
 it('resumes manually without replay and ignores old socket events', () => {
     const { client, socket } = setup();
@@ -175,4 +251,66 @@ it('rejects invalid URLs before constructing a socket', () => {
     expect(client.error.value?.source).toBe('configuration');
     expect(Socket.all).toHaveLength(0);
     client.dispose();
+});
+
+it('correlates bounded diagnostics with the socket without changing the round', () => {
+    const { client, socket } = setup(true);
+    expect(socket.url).toBe('ws://localhost/ws?diagnostics=1');
+    socket.open();
+    socket.message(state);
+    client.startGame();
+    socket.message(running);
+    for (let seq = 0; seq < 160; seq++) client.sendHandSample(hand);
+    const prediction = {
+        type: 'prediction_result',
+        seq: 159,
+        positionId: 1,
+        elapsedMs: 7,
+        letter: 'L',
+        confidence: 0.975,
+        httpStatus: 200,
+        disposition: 'PROCESSED',
+    };
+    socket.message(prediction);
+    expect(client.lastPrediction.value).toEqual(prediction);
+    expect(client.gameState.value).toEqual(running);
+    expect(client.diagnosticEvents.value).toHaveLength(150);
+    expect(client.diagnosticEvents.value.at(-1)).toMatchObject({
+        connection: 1,
+        direction: 'receive',
+        label: 'prediction_result · seq 159',
+    });
+    socket.end();
+    client.reconnect();
+    const resumed = Socket.all.at(-1)!;
+    resumed.open();
+    resumed.message(running);
+    socket.message(prediction);
+    expect(client.lastPrediction.value).toBeNull();
+    expect(client.diagnosticEvents.value.at(-1)).toMatchObject({
+        connection: 2,
+        direction: 'receive',
+        label: 'game_state · RUNNING',
+    });
+    client.resetSession();
+    expect(client.diagnosticEvents.value).toEqual([]);
+});
+
+it('keeps prediction telemetry out of the normal client', () => {
+    const { client, socket } = setup();
+    expect(socket.url).toBe('ws://localhost/ws');
+    socket.open();
+    socket.message(state);
+    socket.message(running);
+    socket.message({
+        type: 'prediction_result',
+        seq: 0,
+        positionId: 1,
+        elapsedMs: 2,
+        failure: 'DISABLED',
+        disposition: 'PROCESSED',
+    });
+    expect(client.lastPrediction.value).toBeNull();
+    expect(client.diagnosticEvents.value).toEqual([]);
+    expect(client.gameState.value).toEqual(running);
 });

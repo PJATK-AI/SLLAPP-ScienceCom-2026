@@ -1,5 +1,6 @@
 package pl.pjatk.ai.sllapp.web.websocket;
 
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
@@ -7,6 +8,11 @@ import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +30,8 @@ import pl.pjatk.ai.sllapp.model.GameSession;
 import pl.pjatk.ai.sllapp.model.LetterRecognition.Attempt;
 import pl.pjatk.ai.sllapp.service.SessionService;
 import pl.pjatk.ai.sllapp.web.websocket.message.GameStateMessage;
+import pl.pjatk.ai.sllapp.web.websocket.message.PredictionDiagnosticMessage;
+import pl.pjatk.ai.sllapp.web.websocket.message.PredictionDiagnosticMessage.Disposition;
 import pl.pjatk.ai.sllapp.web.websocket.message.SampleMessage;
 import tools.jackson.databind.ObjectMapper;
 
@@ -40,17 +48,27 @@ public class SessionConnectionRegistry {
     private final RecognitionProperties recognitionRules;
     private final Duration predictionBudget;
     private final LongSupplier nanoTime;
+    private final Executor diagnosticSender;
     private final ConcurrentHashMap<String, SessionConnection> connections = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SessionConnection> owners = new ConcurrentHashMap<>();
 
     @Autowired
     SessionConnectionRegistry(SessionService sessions, ObjectMapper mapper, Clock clock, AiPredictionClient ai,
                               RecognitionProperties recognitionRules, AiProperties aiProperties) {
-        this(sessions, mapper, clock, ai, recognitionRules, aiProperties.timeout(), System::nanoTime);
+        this(sessions, mapper, clock, ai, recognitionRules, aiProperties.timeout(), System::nanoTime,
+                new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new SynchronousQueue<>(),
+                        Thread.ofPlatform().daemon().name("round-diagnostics").factory(),
+                        new ThreadPoolExecutor.DiscardPolicy()));
     }
 
     SessionConnectionRegistry(SessionService sessions, ObjectMapper mapper, Clock clock, AiPredictionClient ai,
                               RecognitionProperties recognitionRules, Duration predictionBudget, LongSupplier nanoTime) {
+        this(sessions, mapper, clock, ai, recognitionRules, predictionBudget, nanoTime, Runnable::run);
+    }
+
+    SessionConnectionRegistry(SessionService sessions, ObjectMapper mapper, Clock clock, AiPredictionClient ai,
+                              RecognitionProperties recognitionRules, Duration predictionBudget, LongSupplier nanoTime,
+                              Executor diagnosticSender) {
         this.sessions = sessions;
         this.mapper = mapper;
         this.clock = clock;
@@ -58,10 +76,16 @@ public class SessionConnectionRegistry {
         this.recognitionRules = recognitionRules;
         this.predictionBudget = predictionBudget;
         this.nanoTime = nanoTime;
+        this.diagnosticSender = diagnosticSender;
     }
 
-    void register(WebSocketSession socket) {
-        connections.put(socket.getId(), new SessionConnection(socket, mapper));
+    @PreDestroy
+    void stopDiagnostics() {
+        if (diagnosticSender instanceof ExecutorService service) service.shutdownNow();
+    }
+
+    void register(WebSocketSession socket, boolean predictionDiagnostics) {
+        connections.put(socket.getId(), new SessionConnection(socket, mapper, predictionDiagnostics));
     }
 
     SessionConnection find(String socketId) {
@@ -158,31 +182,52 @@ public class SessionConnectionRegistry {
             response = ai.predict(game.sessionId(), sample.hand());
         } catch (RuntimeException exception) {
             log.warn("Could not submit AI prediction for session {}", game.sessionId(), exception);
-            applyPrediction(game, connection, sample.positionId(), attempt, null);
+            finishPrediction(game, connection, sample, attempt, null);
             return;
         }
         response.whenComplete((result, error) ->
-                applyPrediction(game, connection, sample.positionId(), attempt, error == null ? result : null));
+                finishPrediction(game, connection, sample, attempt, error == null ? result : null));
     }
 
-    private void applyPrediction(GameSession game, SessionConnection connection, long positionId,
-                                 Attempt attempt, PredictionResult result) {
+    private void finishPrediction(GameSession game, SessionConnection connection, SampleMessage sample,
+                                  Attempt attempt, PredictionResult result) {
+        long finishedNanos = connection.predictionDiagnostics ? nanoTime.getAsLong() : 0;
+        var disposition = applyPrediction(game, connection, sample.positionId(), attempt, result);
+        if (!connection.predictionDiagnostics) return;
+
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(finishedNanos - attempt.sampleNanos());
+        diagnosticSender.execute(() -> {
+            if (!isOwner(game, connection) || connection.socket.getBufferSize() > 0) return;
+            try {
+                connection.send(PredictionDiagnosticMessage.from(sample, result, elapsedMs, disposition));
+            } catch (IOException | RuntimeException exception) {
+                log.debug("Could not send round diagnostics to WebSocket {}", connection.socket.getId(), exception);
+            }
+        });
+    }
+
+    private Disposition applyPrediction(GameSession game, SessionConnection connection, long positionId,
+                                        Attempt attempt, PredictionResult result) {
         synchronized (game) {
             var recognition = game.recognition();
-            if (!recognition.finishAttempt(attempt)) return;
+            if (!recognition.finishAttempt(attempt)) return Disposition.IGNORED;
             var now = clock.instant();
-            if (!checkActive(game, connection, now)) return;
+            if (!checkActive(game, connection, now)) return Disposition.IGNORED;
             var state = game.state(now);
-            if (state == null || state.positionId() != positionId || recognition.requiresRelease()) return;
+            if (state == null || state.positionId() != positionId || recognition.requiresRelease()) {
+                return Disposition.IGNORED;
+            }
 
             var elapsed = Duration.ofNanos(nanoTime.getAsLong() - attempt.sampleNanos());
             if (elapsed.compareTo(predictionBudget) >= 0) {
                 recognition.resetInput();
-                return;
+                return Disposition.TOO_LATE;
             }
-            if (recognition.countPrediction(attempt, result, state.expectedLetter(), recognitionRules)) {
-                completePosition(game, positionId, now);
+            if (recognition.countPrediction(attempt, result, state.expectedLetter(), recognitionRules)
+                    && completePosition(game, positionId, now)) {
+                return Disposition.POSITION_COMPLETED;
             }
+            return Disposition.PROCESSED;
         }
     }
 

@@ -47,7 +47,12 @@ export function useHandStream(
         }
         try {
             const { score, landmarks } = normalizeHandForModel(hand);
-            session.sendHandSample({ handedness: physicalHand, score, landmarks });
+            session.sendHandSample({
+                handedness: physicalHand,
+                coordinateSpace: 'MEDIAPIPE_IMAGE',
+                score,
+                landmarks,
+            });
         } catch (cause) {
             frameError.value = cause instanceof Error ? cause.message : 'Błędne punkty dłoni.';
         }

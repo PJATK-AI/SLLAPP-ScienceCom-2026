@@ -1,32 +1,47 @@
 # Frontend
 
-The Vue app checks camera tracking and WebSocket transport in the `CREATED`
-session state. It displays the camera preview and last sent sample. The
-[recognition diagnostics panel](local-development.md#recognition-diagnostics)
-shows the additional exchange with the Python prediction service.
+The Vue app runs a timed fingerspelling round over WebSocket. It uses the
+camera to track the selected hand and loads the ranking after the server
+reports the final score.
 [Start the Vue app](../README.md#quick-start)
 
-## Camera and session panel
+The game displays cropped excerpts from [“Alfabet palcowy” on Zintegrowana
+Platforma Edukacyjna](https://zpe.gov.pl/a/w-swiecie-znakow/DNLn0RJB9#RuTDZ6bESDuoy).
+The source image is stored unchanged and licensed under
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+
+## Play a round
 
 1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
-   hand and click **Utwórz sesję**. The server confirms the session with a
-   `game_state` message and the panel displays its ID.
+   hand and click **Utwórz sesję**.
 2. Click **Uruchom kamerę** and allow camera access. The preview draws the 21
    landmarks of the selected hand in the original image coordinates. The points
    disappear when that hand leaves the frame.
-3. Watch **Ostatnia wysłana próbka (JSON)**. The selected hand produces
-   `hand_sample`. An empty frame or a frame showing only the other hand
-   produces `no_hand`. With the camera stopped, the two sample buttons send
-   equivalent transport tests using synthetic data.
-4. Use **Rozłącz** to stop sending while keeping the preview. **Wznów sesję**
-   opens a new connection and restarts the sample sequence. **Zatrzymaj kamerę**
-   releases the camera and re-enables the synthetic sample buttons. Leaving the
-   view or losing the session also releases it.
+3. Click **Rozpocznij rundę** once tracking starts. Sign the highlighted
+   letter. The reference beside the camera displays a crop of the current
+   letter from the Polish fingerspelling chart. When the same letter follows,
+   take your hand out of frame as prompted.
+4. If the connection drops, click **Wznów sesję**. The server returns the
+   current position, time and score, or the final result after the deadline.
+5. When the round ends, the camera stops. The score stays visible while the
+   ranking loads. Use **Ponów** to retry the ranking or **Nowa sesja** to play again.
 
-The default sample rate is 10 Hz. Intermediate frames and frames sent while the
-socket has buffered data are skipped. The panel keeps showing the most recent
-sent frame. To see `sample_ack` confirmations, enable the backend's WebSocket
-diagnostic mode. [WebSocket configuration](api.md#websocket-configuration)
+Use the regular backend with [prediction enabled](local-development.md#enable-prediction-on-the-regular-backend)
+to score gestures. The default sample rate is 10 Hz. The client skips intermediate
+frames and frames produced while the socket has buffered data.
+
+## Round diagnostics
+
+Run `pnpm dev:diagnostics` from `frontend/` and enable WebSocket diagnostics
+on the regular backend. **Diagnostyka** opens on the right, next to the game
+and camera, with compact spacing in narrow browser panels. It shows the
+latest prediction, confidence, HTTP status, time and ACK. Expand **Ostatnia
+próbka** for the latest sample JSON. The scrollable 150-event history shows
+sent and received WebSocket messages. Match a prediction to a sample by
+connection number, `seq` and `positionId`. With the camera off before the
+round, the two sample buttons test transport.
+[Start the diagnostic mode](local-development.md#vue-round-diagnostics) ·
+[Prediction message](api.md#round-prediction-diagnostics)
 
 ## Configuration
 
@@ -38,7 +53,7 @@ error if the port is busy.
 
 | Variable | Value for local use |
 | --- | --- |
-| `VITE_WS_URL` | `ws://127.0.0.1:8080/ws` for the session panel |
+| `VITE_WS_URL` | `ws://127.0.0.1:8080/ws` for gameplay |
 | `VITE_API_BASE_URL` | `http://127.0.0.1:8080/api` for the ranking API client |
 | `VITE_HAND_SAMPLE_HZ` | `10` by default. Supply a positive finite rate. |
 | `VITE_HAND_LANDMARKER_MODEL_URL` | `/mediapipe/hand_landmarker.task` by default |
@@ -53,22 +68,23 @@ in `model/artifacts/model.joblib` runs in the Python prediction service.
 
 ## Session client
 
-`useGameSession({ url, timeoutMs })` owns one WebSocket connection. By default
+`useGameSession({ url, timeoutMs, diagnostics })` owns one WebSocket connection. By default
 it reads `VITE_WS_URL` and allows 10 seconds each for opening the connection and
-receiving session confirmation. It exposes connection status, readiness, the
-latest validated state, errors, closure information and sample diagnostics.
+receiving confirmation of a session or a round start. It exposes connection
+status, readiness, the latest validated state and errors.
 
-Use `createSession({ nickname, selectedHand })`, `disconnect()` and
-`reconnect()` for the session lifecycle. The current browser client accepts
-`CREATED` session states. `sendHandSample(hand)` and `sendNoHand()` add
-`positionId: null` and a shared sequence starting at zero. A true return value
-means the browser accepted the data for sending. A diagnostic `sample_ack`
-confirms that the server accepted the sample.
+`createSession({ nickname, selectedHand })` opens a session. `startGame()`
+sends one request and waits for the server to confirm the round. `reconnect()`
+opens a new socket and waits for the current server state. Both sample types
+carry `positionId: null` in `CREATED` and the active ID in `RUNNING`. They share
+a sequence starting at zero on each connection. A true return value means the
+browser accepted the data for sending. A diagnostic `sample_ack` confirms that
+the server accepted the sample.
 
-The session ID is held in memory and is lost on reload. When the server closes
-an expired session with code 1008, the panel clears its ID so a new session can
-be created. Reconnection is manual. Vue scope disposal or an explicit
-`dispose()` releases the socket, listeners and timers.
+The session ID is held in memory and is lost on reload. Code 1008 clears
+an expired unfinished session. A displayed final score remains until the
+player starts a new session. Vue scope disposal releases the socket, listeners
+and timers.
 [Backend WebSocket contract](api.md#websocket-transport)
 
 ## Landmark coordinates
@@ -91,16 +107,17 @@ invalid coordinates and reports `null` when no valid detection remains.
 For the right-hand-trained letter model, `normalizeHandForModel` from the same
 package reflects left-hand x with `x = 1 - x`. It keeps the handedness label,
 score, landmark order, y and z. The model pipeline handles wrist centering and
-scaling. Both browser panels send the normalized points and the physical hand
-label (`LEFT` or `RIGHT`). The recognition diagnostics panel adds
-`coordinateSpace: "MEDIAPIPE_IMAGE"` for the Python prediction request.
+scaling. Both browser panels send the normalized points, the physical hand
+label (`LEFT` or `RIGHT`) and `coordinateSpace: "MEDIAPIPE_IMAGE"` for the
+Python prediction request. An empty frame or a frame with only the other hand
+produces `no_hand`.
 [Prediction payload](../model/README.md#post-predict)
 
 ## Workspace
 
 | Path | Purpose |
 | --- | --- |
-| [`apps/web/`](../frontend/apps/web/) | Vue camera and session test panel, WebSocket client and ranking API client |
+| [`apps/web/`](../frontend/apps/web/) | Vue game, WebSocket client and ranking API client |
 | [`packages/hand-landmarker/`](../frontend/packages/hand-landmarker/) | MediaPipe tracker, hand selection and coordinate normalization |
 | [`packages/hand-landmarker-vue/`](../frontend/packages/hand-landmarker-vue/) | Vue wrapper for the tracker |
 
