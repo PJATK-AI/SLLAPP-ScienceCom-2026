@@ -92,6 +92,7 @@ it('creates a selected session, sends both test samples and displays acknowledge
     const hand = JSON.parse(socket.send.mock.calls[1]![0]);
     expect(JSON.parse(wrapper.get('pre').text())).toEqual(hand);
     expect(hand.hand.handedness).toBe('LEFT');
+    expect(hand.hand.coordinateSpace).toBe('MEDIAPIPE_IMAGE');
     expect(hand.hand.landmarks).toHaveLength(21);
     await button('Wyślij brak dłoni').trigger('click');
     expect(JSON.parse(socket.send.mock.calls[2]![0])).toEqual({
@@ -184,6 +185,7 @@ it.each(['LEFT', 'RIGHT'] as const)(
                 positionId: null,
                 hand: {
                     handedness: selectedHand,
+                    coordinateSpace: 'MEDIAPIPE_IMAGE',
                     score: 0.8,
                     landmarks: hand.landmarks.map((p) => ({
                         ...p,

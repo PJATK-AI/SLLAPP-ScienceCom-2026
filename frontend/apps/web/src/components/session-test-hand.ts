@@ -3,6 +3,7 @@ import type { HandSampleData, SelectedHand } from '@/models';
 export function createTestHand(handedness: SelectedHand): HandSampleData {
     return {
         handedness,
+        coordinateSpace: 'MEDIAPIPE_IMAGE',
         landmarks: Array.from({ length: 21 }, (_, i) => ({
             x: 0.3 + i * 0.01,
             y: 0.6 - i * 0.01,
