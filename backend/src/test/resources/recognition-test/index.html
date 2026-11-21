@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Test rozpoznawania dłoni</title>
+    <link rel="stylesheet" href="/recognition-test/styles.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "@mediapipe/tasks-vision": "/recognition-test/vision/vision_bundle.mjs"
+            }
+        }
+    </script>
+    <script type="module" src="/recognition-test/app.js"></script>
+</head>
+<body>
+<main>
+    <h1>Test rozpoznawania dłoni</h1>
+    <div class="layout">
+        <section class="panel camera-panel" aria-labelledby="camera-title">
+            <h2 id="camera-title">Kamera</h2>
+            <div class="preview" id="preview">
+                <video id="camera" autoplay muted playsinline aria-label="Podgląd kamery"></video>
+                <canvas id="overlay" aria-hidden="true"></canvas>
+                <p id="camera-placeholder">Uruchom kamerę, aby zobaczyć punkty dłoni.</p>
+            </div>
+            <div class="controls">
+                <button id="camera-toggle" type="button">Uruchom kamerę</button>
+                <label>Dłoń
+                    <select id="selected-hand">
+                        <option value="Right">Prawa</option>
+                        <option value="Left">Lewa</option>
+                    </select>
+                </label>
+            </div>
+            <p id="detection" class="status">Kamera wyłączona</p>
+            <p id="camera-error" class="error" role="status" hidden></p>
+            <dl class="metrics">
+                <div>
+                    <dt>Ostatnia predykcja</dt>
+                    <dd id="prediction">—</dd>
+                </div>
+                <div>
+                    <dt>Próbki</dt>
+                    <dd>do 10 Hz</dd>
+                </div>
+            </dl>
+        </section>
+        <section class="panel traffic-panel" aria-labelledby="traffic-title">
+            <div class="section-header">
+                <h2 id="traffic-title">Ruch WebSocket i HTTP</h2>
+                <button id="clear-traffic" type="button" class="secondary">Wyczyść</button>
+            </div>
+            <div class="controls">
+                <button id="socket-toggle" type="button">Połącz WebSocket</button>
+                <p id="socket-status" class="status" role="status">Rozłączony</p>
+            </div>
+            <p id="traffic-empty" class="empty">Połącz WebSocket, aby zobaczyć wymianę wiadomości.</p>
+            <ol id="traffic" aria-label="Ostatnie 150 zdarzeń"></ol>
+        </section>
+    </div>
+</main>
+</body>
+</html>

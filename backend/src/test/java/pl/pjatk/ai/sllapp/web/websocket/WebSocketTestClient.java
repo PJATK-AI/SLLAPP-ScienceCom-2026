@@ -20,11 +20,15 @@ final class WebSocketTestClient implements WebSocket.Listener, AutoCloseable {
     final WebSocket socket;
 
     WebSocketTestClient(HttpClient client, int port, String origin) throws Exception {
+        this(client, port, origin, "/ws");
+    }
+
+    WebSocketTestClient(HttpClient client, int port, String origin, String path) throws Exception {
         var builder = client.newWebSocketBuilder();
         if (origin != null) {
             builder.header("Origin", origin);
         }
-        socket = builder.buildAsync(URI.create("ws://127.0.0.1:" + port + "/ws"), this)
+        socket = builder.buildAsync(URI.create("ws://127.0.0.1:" + port + path), this)
                 .get(5, TimeUnit.SECONDS);
     }
 

@@ -52,4 +52,26 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>recognition-test</id>
+            <properties>
+                <spring-boot.run.profiles>recognition-test</spring-boot.run.profiles>
+                <spring-boot.run.arguments>--sllapp.ai.enabled=false</spring-boot.run.arguments>
+            </properties>
+            <build>
+                <defaultGoal>spring-boot:test-run</defaultGoal>
+            </build>
+        </profile>
+        <profile>
+            <id>recognition-ai</id>
+            <properties>
+                <spring-boot.run.profiles>recognition-test,recognition-ai</spring-boot.run.profiles>
+            </properties>
+            <build>
+                <defaultGoal>spring-boot:test-run</defaultGoal>
+            </build>
+        </profile>
+    </profiles>
 </project>
