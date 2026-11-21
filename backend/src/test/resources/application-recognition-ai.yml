@@ -1,0 +1,4 @@
+sllapp:
+  ai:
+    enabled: true
+    base-url: ${AI_PREDICTION_BASE_URL:http://127.0.0.1:8000}
