@@ -1,10 +1,10 @@
 # Local development
 
 Use the [README quick start](../README.md#quick-start) for the browser app and
-backend on macOS or Linux. Choose one of the test panels below to work on the
-game engine or inspect AI predictions. Keep each server running in its own
-terminal. Open a new terminal at the repository root before starting another
-set of commands.
+backend on macOS or Linux. Use [Vue round diagnostics](#vue-round-diagnostics)
+to test gameplay in the browser, or use the standalone panels below to check
+the game engine or inspect prediction requests. Start each server in its own
+terminal from the repository root.
 
 | Address | Process | Requirements |
 | --- | --- | --- |
@@ -43,6 +43,62 @@ Open [the app](http://127.0.0.1:5173) and [the ranking API](http://127.0.0.1:808
 to check both processes. Then [enable prediction on the regular backend](#enable-prediction-on-the-regular-backend)
 and follow [play a round](frontend.md#play-a-round).
 
+## Vue round diagnostics
+
+From `frontend/`, run `pnpm setup:local` on first setup. Then start the Vue app
+in diagnostics mode:
+
+```sh
+pnpm dev:diagnostics
+```
+
+Choose the backend startup command for the check you want to run. The regular
+backend uses port 8080 in both cases.
+
+### Check WebSocket samples before a round
+
+Start the regular backend with diagnostic acknowledgements enabled.
+[Backend startup commands for macOS, Linux and Windows](#enable-websocket-acknowledgements)
+
+1. Open [the Vue game](http://127.0.0.1:5173), enter a nickname, select a hand
+   and click **Utwórz sesję**. Leave the camera off.
+2. In **Diagnostyka**, click **Wyślij testową dłoń** and then **Wyślij brak dłoni**.
+3. In **Historia WebSocket**, check that the browser sends `hand_sample` and
+   `no_hand`. Each should have a matching `sample_ack` with the same `seq`.
+   Expand a history entry to inspect its JSON.
+
+### Check live predictions during a round
+
+Start the [Python prediction service](#run-recognition-with-the-python-service)
+and check its [health endpoint](http://127.0.0.1:8000/health). Then start the
+regular backend with both WebSocket diagnostics and prediction enabled. From
+`backend/` on macOS or Linux:
+
+```sh
+SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 sh mvnw spring-boot:run
+```
+
+In PowerShell:
+
+```powershell
+$env:SLLAPP_WEBSOCKET_DIAGNOSTICMODE = 'true'
+$env:AI_PREDICTION_ENABLED = 'true'
+$env:AI_PREDICTION_BASE_URL = 'http://127.0.0.1:8000'
+.\mvnw.cmd spring-boot:run
+```
+
+1. Open [the Vue game](http://127.0.0.1:5173) and create a session. Click
+   **Uruchom kamerę**, allow camera access and click **Rozpocznij rundę**.
+2. Sign the highlighted letter with the selected hand. In **Ostatnia predykcja
+   AI**, check the predicted letter, confidence (**Ufność**), HTTP status and
+   game decision (**Decyzja gry**).
+3. When the panel reports **Zaliczona litera**, check that the score increases
+   and the round advances. Use the connection number, `seq` and `positionId`
+   in **Historia WebSocket** to match a prediction to its sample.
+
+[Frontend diagnostics panel details](frontend.md#round-diagnostics) ·
+[Panel for inspecting raw Java-to-Python HTTP bodies](#run-recognition-with-the-python-service)
+
 ## Game engine tester
 
 From `backend/` on macOS or Linux:
@@ -61,29 +117,6 @@ Open [the game tester](http://127.0.0.1:8081/game-test). Click **Start game**
 and **Complete letter** to exercise the timer, position and scoring using
 simulated completions. Each test round starts with a 60-second timer.
 [Game engine behavior](backend-architecture.md#standalone-game-engine)
-
-## Vue round diagnostics
-
-Start Python as described under [recognition with the Python service](#run-recognition-with-the-python-service).
-To play a round and inspect its predictions, set
-`SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true` when starting the regular backend
-with prediction enabled. For example, from `backend/` on macOS or Linux:
-
-```sh
-SLLAPP_WEBSOCKET_DIAGNOSTICMODE=true AI_PREDICTION_ENABLED=true AI_PREDICTION_BASE_URL=http://127.0.0.1:8000 sh mvnw spring-boot:run
-```
-
-In PowerShell, set `$env:SLLAPP_WEBSOCKET_DIAGNOSTICMODE = 'true'` alongside
-the [regular backend settings](#enable-prediction-on-the-regular-backend).
-From `frontend/`, start the diagnostics variant of the app:
-
-```sh
-pnpm dev:diagnostics
-```
-
-Open [the game](http://127.0.0.1:5173). **Diagnostyka** opens to the right of
-the camera. The columns stack below 288 CSS pixels. For raw Java-to-Python
-HTTP bodies, use the separately launched [recognition panel](#recognition-diagnostics).
 
 ## Recognition diagnostics
 
@@ -120,7 +153,6 @@ latest 150 events and shows `DISABLED` for prediction attempts while AI is off.
 
 ## Run recognition with the Python service
 
-First, prepare the assets in [Recognition diagnostics](#recognition-diagnostics).
 Use the repository's `model/artifacts/model.joblib` and check its SHA-256.
 The checksum and training report are in the same directory. [Delivered model file](../model/README.md#delivered-model-file)
 
@@ -157,6 +189,7 @@ checksum. To use the model from a different path, add
 
 **Terminal 2 · Start diagnostics with AI enabled**
 
+Prepare the assets as shown in [Recognition diagnostics](#recognition-diagnostics).
 If the diagnostics panel is already running on port 8082, stop it before
 starting the AI-enabled mode. From `backend/` on macOS or Linux:
 
@@ -203,9 +236,38 @@ prediction timeout defaults to `250ms`. Set `AI_PREDICTION_TIMEOUT` to change it
 
 ## Automated checks
 
-Run each block from the repository root.
+Start each suite from the repository root. The full checks also run in
+[GitHub Actions](../.github/workflows/ci.yml) on pull requests and pushes to
+`master`.
 
-**Backend** · JDK 21
+### Frontend
+
+Vitest covers the Vue game and diagnostics, WebSocket session creation and
+resumption, ranking requests, and hand selection and normalization. The
+suite uses simulated inputs and can run without a camera, the tracker model
+or a running backend.
+
+```sh
+cd frontend
+pnpm install --frozen-lockfile
+pnpm test
+```
+
+From `frontend/`, run the full frontend CI checks for formatting, builds,
+type checking and tests:
+
+```sh
+pnpm format:check
+pnpm turbo run build typecheck test
+```
+
+Run `pnpm prepare:camera` before a build intended to run camera tracking in
+the browser.
+
+### Backend
+
+The Maven checks cover game rules and scoring, WebSocket sessions and
+recognition, the prediction client, the ranking API and SQLite storage.
 
 ```sh
 cd backend
@@ -213,22 +275,10 @@ sh mvnw -B verify
 ```
 
 In PowerShell, run `.\mvnw.cmd -B verify` after `cd backend`. To run only the
-standalone game engine tests, pass
-`'-Dtest=pl.pjatk.ai.sllapp.game.*Test'` and use the `test` goal.
+standalone game engine tests, use the `test` goal with
+`'-Dtest=pl.pjatk.ai.sllapp.game.*Test'`.
 
-**Frontend** · Node.js and pnpm
-
-```sh
-cd frontend
-pnpm install --frozen-lockfile
-pnpm format:check
-pnpm turbo run build typecheck test
-```
-
-Run `pnpm prepare:camera` before a build intended to run camera tracking in
-the browser. The CI checks do not require the tracker model or a camera.
-
-**Python** · Python 3.13
+### Python
 
 Create the virtual environment and install the pinned dependencies as shown
 in [Run recognition with the Python service](#run-recognition-with-the-python-service).
@@ -244,11 +294,9 @@ On Windows:
 .\.venv\Scripts\python.exe -m unittest discover -s model/tests -t . -v
 ```
 
-The suite starts its own test HTTP server and uses synthetic data for the model
-and service checks. [Python test details](../model/README.md#run-the-tests)
-
-The same three suites run in the [GitHub Actions workflow](../.github/workflows/ci.yml)
-on pull requests and pushes to `master`.
+The suite covers landmark preprocessing, dataset validation, training,
+calibration and the prediction API. The API tests start their own HTTP
+server and use synthetic samples. [Python test details](../model/README.md#run-the-tests)
 
 ## Configuration and troubleshooting
 
@@ -287,5 +335,6 @@ $env:SLLAPP_WEBSOCKET_DIAGNOSTICMODE = 'true'
 .\mvnw.cmd spring-boot:run
 ```
 
-Send a sample in the [browser app](http://127.0.0.1:5173) and check the
-`sample_ack` sequence in the panel.
+With `pnpm dev:diagnostics` running, send a sample in the
+[Vue game](http://127.0.0.1:5173) and check the `sample_ack` sequence in
+**Diagnostyka**.
