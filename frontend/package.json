@@ -7,6 +7,7 @@
         "node": ">=24.15"
     },
     "scripts": {
+        "setup:local": "pnpm install --frozen-lockfile && node scripts/setup-local.mjs && pnpm prepare:camera",
         "setup:recognition": "pnpm install --frozen-lockfile && pnpm prepare:camera && pnpm --filter @sllapp/hand-landmarker build",
         "prepare:camera": "node scripts/prepare-camera.mjs",
         "build": "turbo run build",

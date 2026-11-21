@@ -31,13 +31,13 @@ In terminal 2, from the repository root:
 
 ```powershell
 cd frontend
-if (-not (Test-Path apps/web/.env.local)) { Copy-Item .env.example apps/web/.env.local }
-pnpm install --frozen-lockfile
-pnpm prepare:camera
-pnpm --filter @sllapp/web dev --host 127.0.0.1 --port 5173 --strictPort
+pnpm setup:local
+pnpm dev
 ```
 
-On subsequent starts, run the last command from `frontend/`.
+Run `pnpm setup:local` on first setup. It installs dependencies, creates
+`apps/web/.env.local` if needed and prepares the camera assets.
+Use `pnpm dev` for subsequent starts.
 
 Open [the app](http://127.0.0.1:5173) and [the ranking API](http://127.0.0.1:8080/api/ranking)
 to check both processes. See [the frontend camera walkthrough](frontend.md#camera-and-session-panel)
@@ -48,13 +48,13 @@ for a sample test.
 From `backend/` on macOS or Linux:
 
 ```sh
-sh mvnw spring-boot:test-run -Dspring-boot.run.profiles=game-test
+sh mvnw -Pgame-test
 ```
 
 In PowerShell:
 
 ```powershell
-.\mvnw.cmd spring-boot:test-run "-Dspring-boot.run.profiles=game-test"
+.\mvnw.cmd -Pgame-test
 ```
 
 Open [the game tester](http://127.0.0.1:8081/game-test). Click **Start game**
@@ -232,7 +232,7 @@ on pull requests and pushes to `master`.
 | Symptom | Check |
 | --- | --- |
 | Spring Boot cannot bind to its port | Stop the process already using that port, or check whether the requested server is already running at the address above. |
-| Vite reports a busy port | Free port 5173. To use another port, pass it to Vite and add the exact alternate origin to `sllapp.web.allowed-origins` before starting the backend. |
+| Vite reports a busy port | Free port 5173. To use port 5174, run `pnpm dev -- --port 5174` and add `http://127.0.0.1:5174` to `sllapp.web.allowed-origins` before starting the backend. |
 | Browser reports a missing URL or connection error | Check `VITE_WS_URL` and `VITE_API_BASE_URL` in `frontend/apps/web/.env.local`. Restart Vite after editing the file. |
 | Camera permission was denied or the preview is blank | Use a loopback URL or HTTPS. Check the browser's camera permission and the operating system's camera settings. |
 | Camera assets fail to load | Run `pnpm prepare:camera` for the Vue app or `pnpm setup:recognition` for the recognition panel, from `frontend/`. |
