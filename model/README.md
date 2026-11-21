@@ -1,10 +1,115 @@
-# AI module (`model/`)
+# AI model
 
-Dataset loading, validation, landmark preprocessing and the comparison of preprocessing
-variants for the SPAS hand-landmark dataset used to train the PJM static-sign classifier.
+The Python module trains and serves the PJM static-letter classifier using
+21 MediaPipe hand landmarks per prediction.
 
-Structural validation checks the shape and completeness of the data. It does **not**
-confirm that the gesture labels are linguistically correct PJM signs.
+- [Run recognition locally](../docs/local-development.md#run-recognition-with-the-python-service)
+- [Delivered model file](#delivered-model-file) and [prediction API](#prediction-service)
+- [Dataset](#dataset), [training](#train-the-final-model) and [tests](#run-the-tests)
+
+## Delivered model file
+
+The repository includes the [trained model](artifacts/model.joblib), its
+[SHA-256 checksum](artifacts/model.joblib.sha256) and the
+[training report](artifacts/report.md).
+
+| item | value |
+|---|---|
+| file | `model.joblib` (35 KB) |
+| model | `V3` + `logreg`, temperature calibration, recommended threshold 0.80 |
+| trained with | `python -m model.training --train-final`, scikit-learn 1.9.1, numpy 2.3.3, Python 3.13 |
+| SHA-256 | `7f95cc51f27d28340a3ecfa36ff8c1e69940a1de83d5ec0e8cf73690c69c29af` |
+
+The prediction service loads `model/artifacts/model.joblib` by default.
+To use a different file, pass its path with `--model`. If you have the dataset,
+you can also [train a local model](#train-the-final-model). With the pinned
+versions, a second training run on the same computer produced an identical file.
+[Dataset provenance and license](#provenance-and-license)
+
+Check the checksum before you use the file. The result must be the SHA-256 above:
+
+```powershell
+(Get-FileHash model\artifacts\model.joblib -Algorithm SHA256).Hash.ToLower()
+```
+
+```sh
+sha256sum model/artifacts/model.joblib            # Linux
+shasum -a 256 model/artifacts/model.joblib        # macOS
+```
+
+When the service is running, `GET /health` also returns the checksum of the loaded file
+(`"checksum": "sha256:..."`).
+
+## Prediction service
+
+`model/service.py` returns the most probable letter and its confidence for
+one hand sample. The service returns predictions at any confidence. The
+[training report](#train-the-final-model) documents the recommended threshold of
+0.80. Use the pinned packages in `model/requirements.txt` to load the artifact
+with the scikit-learn version that trained it.
+
+See [Run recognition with the Python service](../docs/local-development.md#run-recognition-with-the-python-service)
+for complete startup commands on macOS, Linux and Windows. Once the Python
+environment is prepared, run the service from the repository root:
+
+```sh
+python -m model.service
+```
+
+For a model stored outside the default path, run
+`python -m model.service --model path/to/model.joblib`.
+
+Settings (a command-line argument wins over the environment variable):
+
+| argument | environment variable | default |
+|---|---|---|
+| `--model` | `SLLAPP_MODEL_PATH` | `model/artifacts/model.joblib` |
+| `--variant` | `SLLAPP_MODEL_VARIANT` | `V3` (`DEFAULT_VARIANT`) |
+| `--host` | `SLLAPP_PREDICT_HOST` | `127.0.0.1` |
+| `--port` | `SLLAPP_PREDICT_PORT` | `8000` |
+
+The service loads the model once at startup. It prints an error and exits with code `1`, without
+opening the port, if the file is missing or is not a model file of format 2, the file was trained
+with a different scikit-learn version, the variant in the file differs from `--variant`, the
+classifier cannot give probabilities (for example an uncalibrated `svm`, saved with
+`--calibration none`) or the model letters are not `A B C E I L M N O P R S T U W Y`.
+
+### `POST /predict`
+
+Send the `hand` object from the [complete WebSocket sample](../docs/api.md#send-hand-samples)
+as the request body. It includes `coordinateSpace`, `handedness` and all 21
+landmarks.
+
+- `coordinateSpace` must be `MEDIAPIPE_IMAGE` and `handedness` must be `LEFT` or `RIGHT`.
+- `landmarks` holds exactly 21 objects with finite numeric `x`, `y`, `z`. Extra fields (for
+  example `score`) are ignored.
+- The service does **not** mirror left-hand samples: the frontend applies `x = 1 - x` to the
+  left hand before sending (`normalizeHandForModel`, issue #29). `handedness` is only validated.
+
+| status | when | body |
+|---|---|---|
+| `200` | valid sample | `{"letter": "A", "confidence": 0.93}` |
+| `400` | body is not valid JSON (also `NaN`/`Infinity` literals, bad UTF-8, empty body) | `{"error": "<message>"}` |
+| `413` | body larger than 64 KiB | `{"error": "<message>"}` |
+| `422` | sample fails validation | `{"error": "<validation message>"}` |
+| `500` | unexpected prediction error | `{"error": "prediction failed"}` |
+
+`letter` is the most probable of the 16 letters. `confidence` is its
+probability from `predict_proba`, on a scale from 0 to 1. The delivered model
+uses temperature calibration. Example 422 messages:
+`hand.coordinateSpace must be MEDIAPIPE_IMAGE, got 'WORLD'`, `expected exactly 21 landmarks, got 20`,
+`landmark 4: y must be finite, got inf`.
+
+### `GET /health`
+
+```json
+{"status": "ok", "variant": "V3", "classifier": "logreg",
+ "letters": ["A", "B", "C", "E", "I", "L", "M", "N", "O", "P", "R", "S", "T", "U", "W", "Y"],
+ "checksum": "sha256:<hex digest of the model file>"}
+```
+
+Only failed requests are logged. The model file is a pickle: start the service only with model
+files that you created or got from the team.
 
 ## Dataset
 
@@ -44,12 +149,10 @@ or point to another folder, in order of priority:
 > **Who confirms:** the owner of the AI area (`model/`), listed in the pinned issue *Project ownership*,
 > confirms the source and the license with the dataset authors and fills in the lines above.
 >
-> **Until then, the model file must not be published.** The model is trained on SPAS, so it is a file
-> derived from the dataset. Share it only inside the team, as described in
-> [Delivered model file](#delivered-model-file). Do not attach it to a GitHub release, commit it or
-> upload it to a public place.
-
-The repository's MIT license (`LICENSE`) covers the project code only, not the dataset or the model file.
+The classifier in this repository was trained on SPAS. The repository's MIT
+license covers the project code. The dataset and trained model have separate
+provenance and redistribution terms, which the project team is still confirming.
+[Repository license](../LICENSE)
 
 ## Landmark order
 
@@ -74,14 +177,14 @@ width/height; observed range roughly 0.02-0.97) and Z is a relative depth (obser
 -0.26 to 0.06). They are not metric world coordinates (a comment in the supplied `RawData.py`
 says the same).
 
-## Usage
+## Development and training
 
 Run all commands from the repository root. Loading, validation and preprocessing need only the
 Python standard library. Training (`model/training.py`) also needs the packages in
 `model/requirements.txt`:
 
-```
-pip install -r model/requirements.txt
+```sh
+python -m pip install -r model/requirements.txt
 ```
 
 ```python
@@ -214,8 +317,7 @@ calibration error (0.17-0.22 against 0.02-0.05) and was rejected.
 ### Train the final model
 
 ```
-python -m model.training --train-final            # writes to model/artifacts/
-python -m model.training --train-final path/to/dir
+python -m model.training --train-final out/model
 ```
 
 This command:
@@ -231,8 +333,10 @@ This command:
    hands and hands with random noise. The report states how many of them reach the recommended threshold;
 5. trains the calibrated pipeline on all 960 samples.
 
-It writes `model.joblib`, `model.joblib.sha256` and `report.md` (the fixed choice, the scikit-learn
-version, the checksum and all tables). `model/artifacts/` is in `.gitignore`: do not commit model files.
+It writes `model.joblib`, `model.joblib.sha256` and `report.md` (the fixed choice,
+the scikit-learn version, the checksum and all tables). Without an output
+directory, the command writes to `model/artifacts/` and can overwrite the three
+tracked files. Use a separate output directory for local training experiments.
 
 Result of the delivered model (from `report.md`): accuracy 0.965 on held-out people, expected
 calibration error 0.020. **Recommended threshold for the backend: 0.80.** At 0.80, 94.5% of the letter
@@ -242,7 +346,7 @@ A threshold alone does not reject poses that are not letters, because the prepro
 normalize rotation. The backend should also require the same letter in several consecutive samples
 (issue #43). The non-letter poses are synthetic. They do not replace a test with real people at the booth.
 
-Train one variant on all samples and save it for inference (no evaluation; do not commit model files):
+To train one variant on all samples and save it for inference without evaluation, run one of these commands:
 
 ```
 python -m model.training --save out/model.joblib --variant V3 --classifier logreg   # calibrated (temperature)
@@ -272,110 +376,6 @@ service dependencies are pinned to exact versions in `model/requirements.txt`. A
 the installed scikit-learn is the pinned one. Model files are pickles (joblib): load only files that
 you created or got from the team.
 
-### Delivered model file
-
-The model file is **not in git** and **not on GitHub**. It is shared only inside the team, until the
-dataset license is confirmed (see [Provenance and license](#provenance-and-license)).
-
-| item | value |
-|---|---|
-| file | `model.joblib` (35 KB) |
-| model | `V3` + `logreg`, temperature calibration, recommended threshold 0.80 |
-| trained with | `python -m model.training --train-final`, scikit-learn 1.9.1, numpy 2.3.3, Python 3.13 |
-| SHA-256 | `7f95cc51f27d28340a3ecfa36ff8c1e69940a1de83d5ec0e8cf73690c69c29af` |
-
-Where to get it: ask the owner of the AI area (pinned issue *Project ownership*). The owner puts the
-file, with `model.joblib.sha256` and `report.md`, in the files of the team's Teams channel. Copy the
-file to `model/artifacts/model.joblib`, or give its path to the service with `--model`. You can also
-build it yourself from the dataset with `python -m model.training --train-final`. With the pinned
-versions, a second training on the same computer made a byte-for-byte identical file. On a different
-computer the checksum can differ. In that case use the delivered file.
-
-Check the checksum before you use the file. The result must be the SHA-256 above:
-
-```powershell
-(Get-FileHash model\artifacts\model.joblib -Algorithm SHA256).Hash.ToLower()
-```
-
-```sh
-sha256sum model/artifacts/model.joblib            # Linux
-shasum -a 256 model/artifacts/model.joblib        # macOS
-```
-
-When the service is running, `GET /health` also returns the checksum of the loaded file
-(`"checksum": "sha256:..."`).
-
-### Prediction service
-
-`model/service.py` is a small HTTP service that returns the predicted letter and its confidence
-for one hand sample. The Java backend calls it for each sample and decides which predictions
-count: the service only predicts and applies no threshold (the recommended threshold, 0.80, is
-in [Train the final model](#train-the-final-model) and in `report.md`). It uses only the Python standard
-library and the packages in `model/requirements.txt` (exact versions; a model file must be loaded
-with the scikit-learn version that trained it).
-
-```
-pip install -r model/requirements.txt
-python -m model.training --train-final              # or use the delivered model file (see above)
-python -m model.service                             # model/artifacts/model.joblib on 127.0.0.1:8000
-python -m model.service --model path/to/model.joblib --variant V3 --port 8001
-```
-
-Settings (a command-line argument wins over the environment variable):
-
-| argument | environment variable | default |
-|---|---|---|
-| `--model` | `SLLAPP_MODEL_PATH` | `model/artifacts/model.joblib` |
-| `--variant` | `SLLAPP_MODEL_VARIANT` | `V3` (`DEFAULT_VARIANT`) |
-| `--host` | `SLLAPP_PREDICT_HOST` | `127.0.0.1` |
-| `--port` | `SLLAPP_PREDICT_PORT` | `8000` |
-
-The service loads the model once at startup. It prints an error and exits with code `1`, without
-opening the port, if the file is missing or is not a model file of format 2, the file was trained
-with a different scikit-learn version, the variant in the file differs from `--variant`, the
-classifier cannot give probabilities (for example an uncalibrated `svm`, saved with
-`--calibration none`) or the model letters are not `A B C E I L M N O P R S T U W Y`.
-
-#### `POST /predict`
-
-The body is the `hand` object of a `hand_sample` message (see `docs/api.md`) with
-`coordinateSpace`:
-
-```json
-{"coordinateSpace": "MEDIAPIPE_IMAGE", "handedness": "RIGHT",
- "landmarks": [{"x": 0.50, "y": 0.70, "z": 0.00}, "... 21 points in MediaPipe order"]}
-```
-
-- `coordinateSpace` must be `MEDIAPIPE_IMAGE` and `handedness` must be `LEFT` or `RIGHT`.
-- `landmarks` holds exactly 21 objects with finite numeric `x`, `y`, `z`. Extra fields (for
-  example `score`) are ignored.
-- The service does **not** mirror left-hand samples: the frontend applies `x = 1 - x` to the
-  left hand before sending (`normalizeHandForModel`, issue #29). `handedness` is only validated.
-
-| status | when | body |
-|---|---|---|
-| `200` | valid sample | `{"letter": "A", "confidence": 0.93}` |
-| `400` | body is not valid JSON (also `NaN`/`Infinity` literals, bad UTF-8, empty body) | `{"error": "<message>"}` |
-| `413` | body larger than 64 KB | `{"error": "<message>"}` |
-| `422` | sample fails validation | `{"error": "<validation message>"}` |
-| `500` | unexpected prediction error | `{"error": "prediction failed"}` |
-
-`letter` is the most probable of the 16 letters and `confidence` (0-1) is its calibrated probability
-from `predict_proba` of the loaded model. Example 422 messages:
-`hand.coordinateSpace must be MEDIAPIPE_IMAGE, got 'WORLD'`, `expected exactly 21 landmarks, got 20`,
-`landmark 4: y must be finite, got inf`.
-
-#### `GET /health`
-
-```json
-{"status": "ok", "variant": "V3", "classifier": "logreg",
- "letters": ["A", "B", "C", "E", "I", "L", "M", "N", "O", "P", "R", "S", "T", "U", "W", "Y"],
- "checksum": "sha256:<hex digest of the model file>"}
-```
-
-Only failed requests are logged. The model file is a pickle: start the service only with model
-files that you created or got from the team.
-
 ### Run the validation
 
 ```
@@ -399,6 +399,9 @@ The training, prediction and HTTP service tests use synthetic data. Tests that
 require the SPAS dataset are skipped when it is absent.
 
 ## What is validated
+
+Validation covers dataset structure and completeness. Verifying the PJM labels
+requires a separate linguistic review.
 
 - file names follow `<LETTER>_<subject>_<repetition>`; every file can be read;
 - every sample has `hasData=True`, `nodesCount=21`, and 21 values in each of X, Y, Z (equal lengths);
