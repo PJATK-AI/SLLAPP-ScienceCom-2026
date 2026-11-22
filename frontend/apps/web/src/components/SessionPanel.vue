@@ -2,10 +2,13 @@
 import { computed, ref, watch } from 'vue';
 import { useGameSession } from '@/composables/game-session';
 import type { SelectedHand } from '@/models';
+import BrainRaster from './BrainRaster.vue';
 import CameraTrackingPanel from './CameraTrackingPanel.vue';
+import OrbitRing from './OrbitRing.vue';
 import SignReference from './SignReference.vue';
 import RoundRanking from './RoundRanking.vue';
 import SessionDiagnostics from './SessionDiagnostics.vue';
+import { randomNickname } from './random-nickname';
 
 const diagnosticMode = import.meta.env.DEV && import.meta.env.MODE === 'diagnostics';
 const cameraActive = ref(false);
@@ -28,11 +31,13 @@ const {
 
 const running = computed(() => (gameState.value?.status === 'RUNNING' ? gameState.value : null));
 const remainingSeconds = ref(0);
+const remainingMs = ref(0);
 watch(running, (state, _previous, onCleanup) => {
     if (!state) return;
     const deadline = performance.now() + state.remainingMs;
     const tick = () => {
-        remainingSeconds.value = Math.ceil(Math.max(0, deadline - performance.now()) / 1000);
+        remainingMs.value = Math.max(0, deadline - performance.now());
+        remainingSeconds.value = Math.ceil(remainingMs.value / 1000);
     };
     tick();
     const interval = setInterval(() => {
@@ -42,11 +47,37 @@ watch(running, (state, _previous, onCleanup) => {
     onCleanup(() => clearInterval(interval));
 });
 
+// The longest remaining time seen in this session is the round length that the orbit counts down.
+const roundLength = ref({ sessionId: '', ms: 0 });
+watch(running, (state) => {
+    if (!state) return;
+    if (roundLength.value.sessionId !== state.sessionId || state.remainingMs > roundLength.value.ms)
+        roundLength.value = { sessionId: state.sessionId, ms: state.remainingMs };
+});
+const timeProgress = computed(() =>
+    roundLength.value.ms > 0
+        ? Math.min(1, remainingMs.value / roundLength.value.ms)
+        : 1,
+);
+
 const clock = computed(() => {
     const minutes = Math.floor(remainingSeconds.value / 60);
     const seconds = remainingSeconds.value % 60;
     return [minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
 });
+// There is no pause on the server: ending the game closes the session and returns to the start.
+const confirmEnd = ref(false);
+watch(running, (state) => {
+    if (!state) confirmEnd.value = false;
+});
+function endGame() {
+    confirmEnd.value = false;
+    resetSession();
+}
+const lowTime = computed(() => !!running.value && remainingSeconds.value <= 10);
+const handName = computed(() =>
+    (gameState.value?.selectedHand ?? selectedHand.value) === 'LEFT' ? 'lewą' : 'prawą',
+);
 const connectionLost = computed(() => gameState.value && !isReady.value);
 const gameError = computed(() => {
     if (connectionLost.value || gameState.value?.status === 'FINISHED') return '';
@@ -58,43 +89,115 @@ const gameError = computed(() => {
 </script>
 
 <template>
-    <div :class="{ 'with-diagnostics': diagnosticMode }">
+    <div class="panel" :class="{ 'with-diagnostics': diagnosticMode }">
         <section
             v-if="gameState?.status === 'FINISHED'"
             class="result"
             aria-labelledby="result-title"
         >
-            <div class="result-summary card">
+            <div class="decor" aria-hidden="true">
+                <BrainRaster class="decor-brain" />
+                <span class="decor-orbit"></span>
+            </div>
+            <div class="result-summary">
+                <p class="label">{{ gameState.nickname }}</p>
                 <h2 id="result-title">Koniec rundy</h2>
-                <p class="final-score">
-                    <strong>{{ gameState.score }}</strong> pkt
-                </p>
+                <div class="score-disc">
+                    <p class="final-score">
+                        <strong>{{ gameState.score }}</strong> pkt
+                    </p>
+                </div>
                 <button type="button" class="primary" @click="resetSession">Nowa sesja</button>
             </div>
-            <RoundRanking :key="gameState.sessionId" />
+            <RoundRanking
+                :key="gameState.sessionId"
+                class="result-ranking"
+                :player="{ nickname: gameState.nickname, score: gameState.score }"
+            />
         </section>
 
-        <section v-else aria-label="Runda">
-            <div v-if="!gameState" class="setup card">
-                <h2>Przygotuj się do gry</h2>
-                <p>Użyj dłoni, by zamigać litery wyświetlane w rundzie.</p>
-                <form @submit.prevent="createSession({ nickname, selectedHand })">
-                    <fieldset :disabled="pendingAction !== null">
-                        <label for="nickname">Nick</label>
-                        <input id="nickname" v-model="nickname" required autocomplete="off" />
-                        <label for="selected-hand">Dłoń do migania</label>
-                        <select id="selected-hand" v-model="selectedHand">
-                            <option value="RIGHT">Prawa</option>
-                            <option value="LEFT">Lewa</option>
-                        </select>
-                        <button type="submit" class="primary">
-                            {{ pendingAction === 'create' ? 'Łączenie…' : 'Utwórz sesję' }}
-                        </button>
-                    </fieldset>
-                </form>
-            </div>
+        <section
+            v-else
+            class="round"
+            :class="gameState ? `is-${gameState.status.toLowerCase()}` : 'is-setup'"
+            aria-label="Runda"
+        >
+            <template v-if="!gameState">
+                <div class="decor" aria-hidden="true">
+                    <BrainRaster class="decor-brain" />
+                    <span class="decor-orbit"></span>
+                    <span class="decor-ring"></span>
+                    <span class="decor-disc"></span>
+                    <span class="decor-dot"></span>
+                </div>
+                <div class="setup">
+                    <div class="hero">
+                        <p class="wordmark hero-mark" aria-label="PJATK AI">
+                            PJATK<span class="brace">{</span>AI<span class="brace">}</span>
+                        </p>
+                        <span class="accent" aria-hidden="true"></span>
+                        <h2>Przeliteruj<br />słowo.</h2>
+                        <p>Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu palcowego.</p>
+                        <slot name="setup-extra" />
+                    </div>
+                    <form class="setup-card" @submit.prevent="createSession({ nickname, selectedHand })">
+                        <fieldset :disabled="pendingAction !== null">
+                            <label class="label" for="nickname">Twój nick</label>
+                            <div class="nick-row">
+                                <input
+                                    id="nickname"
+                                    v-model="nickname"
+                                    required
+                                    maxlength="20"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                />
+                                <button
+                                    type="button"
+                                    class="dice"
+                                    @click="nickname = randomNickname()"
+                                >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <rect x="3" y="3" width="18" height="18" rx="4" />
+                                        <circle cx="8.5" cy="8.5" r="1.3" />
+                                        <circle cx="12" cy="12" r="1.3" />
+                                        <circle cx="15.5" cy="15.5" r="1.3" />
+                                    </svg>
+                                    Losuj
+                                </button>
+                            </div>
+                            <fieldset class="hands">
+                                <legend class="label">Dłoń do migania</legend>
+                                <div class="segmented">
+                                    <label>
+                                        <input
+                                            v-model="selectedHand"
+                                            type="radio"
+                                            name="selected-hand"
+                                            value="LEFT"
+                                        />
+                                        <span>Lewa</span>
+                                    </label>
+                                    <label>
+                                        <input
+                                            v-model="selectedHand"
+                                            type="radio"
+                                            name="selected-hand"
+                                            value="RIGHT"
+                                        />
+                                        <span>Prawa</span>
+                                    </label>
+                                </div>
+                            </fieldset>
+                            <button type="submit" class="primary start">
+                                {{ pendingAction === 'create' ? 'Łączenie…' : 'Zaczynamy' }}
+                            </button>
+                        </fieldset>
+                    </form>
+                </div>
+            </template>
 
-            <div v-if="connectionLost" class="connection card" role="status">
+            <div v-if="connectionLost" class="notice" role="status">
                 <p>Połączenie przerwane. Wznów sesję, aby pobrać stan rundy.</p>
                 <button
                     type="button"
@@ -105,13 +208,95 @@ const gameError = computed(() => {
                     {{ pendingAction === 'resume' ? 'Wznawianie…' : 'Wznów sesję' }}
                 </button>
             </div>
-            <p v-if="gameError" class="error" role="alert">{{ gameError }}</p>
+            <p v-if="gameError" class="notice error" role="alert">{{ gameError }}</p>
 
-            <div v-if="running" class="round-status card">
-                <div>
-                    <p class="label">Zamigaj literę</p>
-                    <p class="requested-letter" aria-live="polite">{{ running.expectedLetter }}</p>
-                    <p class="word" :aria-label="`Słowo: ${running.word}`">
+            <div v-if="gameState" class="play">
+                <div class="camera-area">
+                    <CameraTrackingPanel
+                        :key="gameState.sessionId"
+                        :ready="isReady"
+                        :selected-hand="gameState.selectedHand"
+                        :send-hand-sample="sendHandSample"
+                        :send-no-hand="sendNoHand"
+                        @active="cameraActive = $event"
+                    >
+                        <button
+                            v-if="gameState.status === 'CREATED'"
+                            type="button"
+                            class="primary"
+                            :disabled="!isReady || !cameraActive || pendingAction !== null"
+                            @click="startGame"
+                        >
+                            {{ pendingAction === 'start' ? 'Rozpoczynanie…' : 'Rozpocznij rundę' }}
+                        </button>
+                        <button
+                            v-if="gameState.status === 'CREATED'"
+                            type="button"
+                            class="quiet-action"
+                            @click="resetSession"
+                        >
+                            Wróć
+                        </button>
+                        <template v-if="running">
+                            <button
+                                v-if="!confirmEnd"
+                                type="button"
+                                class="end-action"
+                                @click="confirmEnd = true"
+                            >
+                                Zakończ grę
+                            </button>
+                            <span v-else class="end-confirm" role="group" aria-label="Zakończyć grę?">
+                                <span class="end-question">Zakończyć grę?</span>
+                                <button type="button" class="end-action danger" @click="endGame">
+                                    Tak, zakończ
+                                </button>
+                                <button type="button" class="end-action" @click="confirmEnd = false">
+                                    Graj dalej
+                                </button>
+                            </span>
+                        </template>
+                    </CameraTrackingPanel>
+                </div>
+
+                <div v-if="gameState.status === 'CREATED'" class="ready-copy">
+                    <span class="accent" aria-hidden="true"></span>
+                    <p class="label">{{ gameState.nickname }}</p>
+                    <h2>Gotowy?</h2>
+                    <p>
+                        Uruchom kamerę, pokaż {{ handName }} dłoń i rozpocznij rundę. Liczy się
+                        czas.
+                    </p>
+                </div>
+
+                <div v-if="running" class="hud">
+                    <div class="letter-row">
+                        <div class="letter-block with-ring">
+                            <OrbitRing :progress="timeProgress" />
+                            <div class="letter-disc">
+                                <span class="disc-label">Zamigaj</span>
+                                <span
+                                    :key="running.positionId"
+                                    class="requested-letter"
+                                    aria-live="polite"
+                                    >{{ running.expectedLetter }}</span
+                                >
+                                <span
+                                    role="timer"
+                                    class="disc-timer"
+                                    :class="{ low: lowTime }"
+                                    :aria-label="`Pozostało ${clock}`"
+                                    >{{ clock }}</span
+                                >
+                            </div>
+                        </div>
+                        <SignReference
+                            :expected-letter="running.expectedLetter"
+                            :mirrored="running.selectedHand === 'RIGHT'"
+                        />
+                    </div>
+
+                    <p :key="running.word" class="word" :aria-label="`Słowo: ${running.word}`">
                         <span
                             v-for="(letter, index) in running.word"
                             :key="index"
@@ -123,51 +308,24 @@ const gameError = computed(() => {
                             >{{ letter }}</span
                         >
                     </p>
-                </div>
-                <div class="metrics">
-                    <div>
-                        <span class="label">Czas</span
-                        ><strong role="timer" :aria-label="`Pozostało ${clock}`">{{
-                            clock
-                        }}</strong>
-                    </div>
-                    <div>
-                        <span class="label">Punkty</span
-                        ><strong aria-live="polite">{{ running.score }}</strong>
-                    </div>
-                </div>
-                <p v-if="running.requiresRelease" class="release" role="status">
-                    Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.
-                </p>
-                <p v-if="remainingSeconds === 0 && isReady" class="round-wait" role="status">
-                    Czekamy na wynik rundy…
-                </p>
-            </div>
 
-            <div
-                v-if="gameState"
-                class="play-area"
-                :class="{ 'has-reference': running && !diagnosticMode }"
-            >
-                <CameraTrackingPanel
-                    :key="gameState.sessionId"
-                    :ready="isReady"
-                    :selected-hand="gameState.selectedHand"
-                    :send-hand-sample="sendHandSample"
-                    :send-no-hand="sendNoHand"
-                    @active="cameraActive = $event"
-                >
-                    <button
-                        v-if="gameState.status === 'CREATED'"
-                        type="button"
-                        class="primary"
-                        :disabled="!isReady || !cameraActive || pendingAction !== null"
-                        @click="startGame"
-                    >
-                        {{ pendingAction === 'start' ? 'Rozpoczynanie…' : 'Rozpocznij rundę' }}
-                    </button>
-                </CameraTrackingPanel>
-                <SignReference v-if="running" :expected-letter="running.expectedLetter" />
+                    <p v-if="running.requiresRelease" class="hint" role="status">
+                        Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.
+                    </p>
+                    <p v-else-if="remainingSeconds === 0 && isReady" class="hint" role="status">
+                        Czekamy na wynik rundy…
+                    </p>
+
+                    <div class="scoreline">
+                        <p class="label">
+                            Punkty
+                            <strong :key="running.score" class="points" aria-live="polite">{{
+                                running.score
+                            }}</strong>
+                        </p>
+                        <p class="label player">{{ running.nickname }}</p>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -180,135 +338,549 @@ const gameError = computed(() => {
 </template>
 
 <style scoped>
+.panel {
+    height: 100%;
+    min-height: 0;
+}
+.round,
+.result {
+    height: 100%;
+    min-height: 0;
+}
 h2 {
     margin: 0;
-    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-family: var(--font-display);
+    font-weight: 400;
+    line-height: 1.06;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
 }
+.accent {
+    display: block;
+    width: clamp(3rem, 7vmin, 6rem);
+    height: clamp(5px, 0.7vmin, 8px);
+    border-radius: 4px;
+    background: var(--red);
+}
+
+/* Decorative brand motifs: brain raster, orbits and discs from the posters. */
+.decor {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.decor-brain {
+    position: absolute;
+    right: -8vmin;
+    top: 12vmin;
+    width: min(70vmin, 760px);
+    color: var(--brain);
+}
+.decor-orbit,
+.decor-ring,
+.decor-disc,
+.decor-dot {
+    position: absolute;
+    border-radius: 50%;
+}
+.decor-orbit {
+    right: -36vmin;
+    top: -26vmin;
+    width: 70vmin;
+    height: 70vmin;
+    border: 4px solid var(--red);
+}
+.decor-ring {
+    right: -22vmin;
+    bottom: -20vmin;
+    width: 58vmin;
+    height: 58vmin;
+    border: 4px solid var(--red);
+}
+.decor-disc {
+    right: -13vmin;
+    bottom: -15vmin;
+    width: 38vmin;
+    height: 38vmin;
+    background: var(--disc);
+}
+.decor-dot {
+    right: 20vmin;
+    bottom: 19vmin;
+    width: 6vmin;
+    height: 6vmin;
+    background: var(--disc-small);
+}
+
+/* Start screen. */
 .setup {
-    max-width: 34rem;
+    position: relative;
+    z-index: 1;
+    display: grid;
+    align-content: center;
+    gap: calc(var(--pad) * 1.2);
+    height: 100%;
+    max-width: 62rem;
 }
-.setup p {
+.hero {
+    display: grid;
+    gap: calc(var(--pad) * 0.7);
+}
+.hero-mark {
+    margin-bottom: calc(var(--pad) * 0.3);
+    font-size: clamp(2rem, 6vmin, 4.6rem);
+}
+.hero h2 {
+    font-size: clamp(2.6rem, 9.5vmin, 7.5rem);
+}
+.hero p {
+    margin: 0;
+    max-width: 34rem;
+    font-size: clamp(1.05rem, 2.8vmin, 2.1rem);
+    line-height: 1.4;
     color: var(--muted);
 }
-fieldset {
+.setup-card {
+    padding: calc(var(--pad) * 1.1);
+    border-radius: calc(var(--radius) * 1.3);
+    background: var(--glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-line);
+    box-shadow: var(--glass-shadow);
+}
+.setup-card > fieldset {
     display: grid;
-    gap: 0.5rem;
-    border: 0;
+    gap: calc(var(--pad) * 0.55);
+    margin: 0;
     padding: 0;
-    margin: 1.5rem 0 0;
+    border: 0;
 }
-fieldset select,
-fieldset input {
-    margin-bottom: 0.75rem;
-}
-label {
-    font-weight: 650;
-}
-.connection {
+.nick-row {
     display: flex;
-    gap: 1rem;
+    gap: 0.75rem;
+    margin-top: -0.3rem;
+}
+.nick-row input {
+    flex: 1;
+    min-width: 0;
+    height: clamp(3.4rem, 7.5vmin, 6rem);
+    padding: 0 1.1rem;
+    border: 2px solid var(--field-line);
+    border-radius: calc(var(--radius) * 0.8);
+    background: var(--field);
+    font-family: var(--font-display);
+    font-size: clamp(1.3rem, 3.4vmin, 2.6rem);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.nick-row input:focus-visible {
+    outline-offset: 0;
+}
+.dice {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    height: clamp(3.4rem, 7.5vmin, 6rem);
+    border-radius: calc(var(--radius) * 0.8);
+    font-size: clamp(1rem, 2.2vmin, 1.7rem);
+}
+.dice svg {
+    width: 1.3em;
+    height: 1.3em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+.dice circle {
+    fill: currentColor;
+    stroke: none;
+}
+.hands {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.hands legend {
+    padding: 0;
+    margin-bottom: 0.6rem;
+}
+.segmented {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+    padding: 0.4rem;
+    border-radius: calc(var(--radius) * 0.9);
+    background: var(--surface-strong);
+}
+.segmented label {
+    position: relative;
+    cursor: pointer;
+}
+.segmented input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+    margin: 0;
+    cursor: pointer;
+}
+.segmented span {
+    display: grid;
+    place-items: center;
+    height: clamp(3rem, 6.4vmin, 5rem);
+    border-radius: calc(var(--radius) * 0.7);
+    font-weight: 600;
+    font-size: clamp(1.05rem, 2.5vmin, 1.9rem);
+    color: var(--muted);
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease;
+}
+.segmented input:checked + span {
+    background: var(--toggle-on-bg);
+    color: var(--toggle-on-fg);
+}
+.segmented input:focus-visible + span {
+    outline: 3px solid var(--red);
+    outline-offset: 2px;
+}
+.start {
+    height: clamp(4rem, 9vmin, 7.5rem);
+    font-size: clamp(1.4rem, 3.6vmin, 2.8rem);
+}
+
+/* Notices. */
+.notice {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
+    gap: 1rem;
+    margin: 0 0 1rem;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--line);
 }
-.connection p {
+.notice p {
     margin: 0;
 }
-.error {
+.notice.error {
     color: var(--error);
 }
-.play-area {
-    display: grid;
-    align-items: start;
-    gap: 1rem;
+
+/* Camera and round. */
+.round:not(.is-setup) {
+    display: flex;
+    flex-direction: column;
 }
+.play {
+    flex: 1;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: calc(var(--pad) * 0.9);
+    min-height: 0;
+}
+.camera-area {
+    align-self: stretch;
+    min-height: 0;
+    height: 100%;
+}
+.ready-copy {
+    display: grid;
+    gap: 0.8rem;
+    justify-items: start;
+}
+.ready-copy h2 {
+    font-size: clamp(2.2rem, 7vmin, 5.5rem);
+}
+.ready-copy p {
+    margin: 0;
+    max-width: 34rem;
+    font-size: clamp(1rem, 2.4vmin, 1.8rem);
+    line-height: 1.4;
+}
+.ready-copy p:not(.label) {
+    color: var(--muted);
+}
+.disc-timer {
+    font-family: var(--font-display);
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+}
+@keyframes pulse {
+    50% {
+        transform: scale(1.06);
+    }
+}
+.hud {
+    display: grid;
+    gap: calc(var(--pad) * 0.7);
+    min-height: 0;
+}
+.letter-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: calc(var(--pad) * 0.9);
+    align-items: center;
+    height: var(--letter-size);
+    --letter-size: clamp(9rem, min(34vw, 21dvh), 26rem);
+}
+.letter-block {
+    position: relative;
+    width: var(--letter-size);
+    height: var(--letter-size);
+}
+.letter-disc {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    border-radius: 50%;
+    background: var(--red);
+    color: #fff;
+}
+.requested-letter {
+    animation: pop 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.with-ring .letter-disc {
+    inset: 9%;
+    background: transparent;
+    color: var(--fg);
+}
+.with-ring .disc-label {
+    color: var(--muted);
+}
+.with-ring .disc-timer {
+    color: var(--red);
+}
+@keyframes pop {
+    from {
+        transform: scale(0.6);
+        opacity: 0;
+    }
+}
+.disc-label {
+    font-family: var(--font-display);
+    font-size: calc(var(--letter-size) * 0.055);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+.requested-letter {
+    font-family: var(--font-display);
+    font-size: calc(var(--letter-size) * 0.58);
+    line-height: 1;
+}
+.with-ring .requested-letter {
+    font-size: calc(var(--letter-size) * 0.46);
+}
+.disc-timer {
+    font-size: calc(var(--letter-size) * 0.1);
+}
+.disc-timer.low {
+    animation: pulse 1s ease-in-out infinite;
+}
+.word {
+    display: flex;
+    gap: clamp(0.4rem, 1.2vmin, 1rem);
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, min(8vw, 5.5dvh), 6rem);
+    line-height: 1;
+}
+.word span {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    padding: 0.32em 0;
+    border-radius: calc(var(--radius) * 0.7);
+    border: 2px solid var(--line);
+    transition:
+        background-color 0.3s ease,
+        color 0.3s ease,
+        border-color 0.3s ease;
+}
+.word .complete {
+    border-color: transparent;
+    background: var(--surface-strong);
+    color: var(--done);
+}
+.word .current {
+    border-color: var(--red);
+    background: var(--red);
+    color: #fff;
+    animation: pop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.hint {
+    margin: 0;
+    padding: 0.8em 1.1em;
+    border-radius: var(--radius);
+    background: var(--surface-strong);
+    font-weight: 600;
+    font-size: clamp(1rem, 2.2vmin, 1.6rem);
+    text-align: center;
+}
+.scoreline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding-top: 0.8rem;
+    border-top: 2px solid var(--fg);
+}
+.points {
+    display: inline-block;
+    margin-left: 0.6em;
+    font-size: 2.6em;
+    font-weight: 400;
+    color: var(--fg);
+    letter-spacing: 0.02em;
+    animation: bump 0.4s ease;
+}
+@keyframes bump {
+    40% {
+        transform: scale(1.25);
+        color: var(--red);
+    }
+}
+.player {
+    color: var(--fg);
+}
+
+/* End / back controls under the camera. */
+.quiet-action,
+.end-action {
+    min-height: clamp(2.8rem, 5.4vmin, 4.4rem);
+    padding-inline: 1.4em;
+    font-size: clamp(0.95rem, 1.8vmin, 1.4rem);
+}
+.quiet-action {
+    border-color: transparent;
+    color: var(--muted);
+}
+.end-action.danger {
+    border-color: var(--red);
+    background: var(--red);
+    color: #fff;
+}
+.end-confirm {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+}
+.end-question {
+    font-weight: 600;
+    font-size: clamp(0.95rem, 1.8vmin, 1.4rem);
+}
+
+/* Result. */
+.result {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: calc(var(--pad) * 1.2);
+}
+.result-summary {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: start;
+    gap: calc(var(--pad) * 0.6);
+}
+.result-summary h2 {
+    font-size: clamp(2.2rem, 7vmin, 5.5rem);
+}
+.score-disc {
+    display: grid;
+    place-items: center;
+    width: clamp(12rem, min(46vw, 30dvh), 30rem);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--red);
+    color: #fff;
+    animation: pop 0.6s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.final-score {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.2rem, 3vmin, 2.4rem);
+    text-align: center;
+}
+.final-score strong {
+    display: block;
+    font-weight: 400;
+    font-size: 3em;
+    line-height: 1;
+}
+.result-summary .primary {
+    height: clamp(3.6rem, 8vmin, 6.5rem);
+    padding-inline: 2.2em;
+    font-size: clamp(1.2rem, 3vmin, 2.2rem);
+}
+.result-ranking {
+    position: relative;
+    z-index: 1;
+}
+.result .decor-brain {
+    top: auto;
+    bottom: -6vmin;
+}
+
+/* Landscape: camera on the left, everything else on the right. */
+@media (orientation: landscape) {
+    .setup {
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+        align-items: center;
+        max-width: none;
+    }
+    .play {
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+    }
+    .hud,
+    .ready-copy {
+        align-self: center;
+    }
+    .letter-row {
+        --letter-size: clamp(8rem, min(17vw, 30dvh), 22rem);
+    }
+    .word {
+        font-size: clamp(2.2rem, min(6vw, 10dvh), 7rem);
+    }
+    .result {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        align-items: center;
+    }
+}
+
+/* Diagnostics mode is a developer view: let the page scroll. */
 .with-diagnostics {
     display: grid;
     align-items: start;
     gap: 1rem;
+    height: auto;
 }
 .with-diagnostics > section {
     min-width: 0;
+    height: auto;
 }
-.round-status {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: start;
-    gap: 1rem;
-    margin-bottom: 1rem;
+.with-diagnostics .play {
+    height: auto;
 }
-.label {
-    margin: 0;
-    font-weight: 650;
-    color: var(--muted);
+.with-diagnostics .camera-area {
+    height: 60vh;
 }
-.requested-letter {
-    margin: 0.25rem 0 0.75rem;
-    color: var(--accent);
-    font-size: clamp(3.5rem, 10vw, 5.5rem);
-    font-weight: 750;
-    line-height: 1;
-}
-.word {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 700;
-}
-.word span {
-    padding: 0.1rem 0.4rem;
-    border-bottom: 3px solid transparent;
-}
-.word .current {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-.word .complete {
-    color: var(--muted);
-}
-.metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-.metrics div {
-    display: grid;
-    padding: 0.5rem 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.6rem;
-}
-.metrics strong {
-    font-size: clamp(1.25rem, 4vw, 2rem);
-    font-variant-numeric: tabular-nums;
-}
-.release,
-.round-wait {
-    grid-column: 1 / -1;
-    margin: 0;
-}
-.release {
-    padding: 0.75rem;
-    border-radius: 0.5rem;
-    background: #fff1ce;
-    color: #583e06;
-    font-weight: 650;
-}
-.result {
-    display: grid;
-    gap: 1rem;
-    align-items: start;
-}
-.final-score {
-    margin: 0.65rem 0 1rem;
-    color: var(--accent);
-}
-.final-score strong {
-    font-size: clamp(2.5rem, 8vw, 4rem);
-}
-@media (min-width: 18rem) {
+@media (min-width: 48rem) {
     .with-diagnostics {
         grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
     }
@@ -317,52 +889,6 @@ label {
         top: 0.75rem;
         max-height: calc(100dvh - 1.5rem);
         overflow: auto;
-    }
-}
-@media (min-width: 48rem) {
-    .play-area.has-reference {
-        grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-    }
-    .result {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
-    }
-    .with-diagnostics .result {
-        grid-template-columns: minmax(0, 1fr);
-    }
-}
-@media (max-width: 26rem) {
-    .round-status {
-        grid-template-columns: 1fr;
-    }
-}
-@media (max-width: 36rem) {
-    .with-diagnostics {
-        gap: 0.5rem;
-    }
-    .with-diagnostics :deep(.card) {
-        padding: 0.625rem;
-    }
-    .with-diagnostics h2 {
-        font-size: 1.125rem;
-    }
-    .with-diagnostics fieldset > * {
-        min-width: 0;
-    }
-    .with-diagnostics .requested-letter {
-        font-size: 2.5rem;
-    }
-    .with-diagnostics .round-status {
-        gap: 0.5rem;
-    }
-    .with-diagnostics .metrics {
-        gap: 0.25rem;
-    }
-    .with-diagnostics .metrics div {
-        padding: 0.2rem 0.35rem;
-        font-size: 0.75rem;
-    }
-    .with-diagnostics :deep(.camera video) {
-        min-height: 4rem;
     }
 }
 </style>
