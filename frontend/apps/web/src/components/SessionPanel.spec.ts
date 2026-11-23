@@ -73,7 +73,7 @@ it('creates a selected session, sends both test samples and displays acknowledge
     vi.stubEnv('DEV', true);
     const wrapper = mount(SessionPanel);
     await wrapper.get('input').setValue('Ola');
-    await wrapper.get('select').setValue('LEFT');
+    await wrapper.get('input[value="LEFT"]').setValue(true);
     await wrapper.get('form').trigger('submit');
     const socket = Socket.last;
     socket.readyState = 1;
@@ -152,7 +152,7 @@ it.each(['LEFT', 'RIGHT'] as const)(
         const wrapper = mount(SessionPanel);
         const button = (name: string) => wrapper.findAll('button').find((b) => b.text() === name)!;
         await wrapper.get('input').setValue('Test');
-        await wrapper.get('select').setValue(selectedHand);
+        await wrapper.get(`input[value="${selectedHand}"]`).setValue(true);
         await wrapper.get('form').trigger('submit');
         expect(wrapper.find('video').exists()).toBe(false);
         const socket = Socket.last;
