@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import SessionPanel from './SessionPanel.vue';
 import SignReference from './SignReference.vue';
+import { CameraSettingsKey, type CameraSettingsContext } from '@/composables/camera-settings/key';
 import { gameLetters } from '@/models/game-session';
 import {
     type Hand,
@@ -44,6 +45,10 @@ function mockCamera() {
     );
     return { frame: (hand: Hand | null, timestamp: number) => frame(hand, timestamp), stop };
 }
+function mountPanel() {
+    const cameraSettings: CameraSettingsContext = { crop: ref(null), saveCrop: vi.fn() };
+    return mount(SessionPanel, { global: { provide: { [CameraSettingsKey]: cameraSettings } } });
+}
 class Socket extends EventTarget {
     static OPEN = 1;
     static CLOSING = 2;
@@ -71,7 +76,7 @@ it('creates a selected session, sends both test samples and displays acknowledge
     vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
     vi.stubEnv('MODE', 'diagnostics');
     vi.stubEnv('DEV', true);
-    const wrapper = mount(SessionPanel);
+    const wrapper = mountPanel();
     await wrapper.get('input').setValue('Ola');
     await wrapper.get('input[value="LEFT"]').setValue(true);
     await wrapper.get('form').trigger('submit');
@@ -149,7 +154,7 @@ it.each(['LEFT', 'RIGHT'] as const)(
         vi.stubEnv('VITE_HAND_SAMPLE_HZ', selectedHand === 'LEFT' ? '' : '20');
         const interval = selectedHand === 'LEFT' ? 100 : 50;
         const tracker = mockCamera();
-        const wrapper = mount(SessionPanel);
+        const wrapper = mountPanel();
         const button = (name: string) => wrapper.findAll('button').find((b) => b.text() === name)!;
         await wrapper.get('input').setValue('Test');
         await wrapper.get(`input[value="${selectedHand}"]`).setValue(true);
@@ -276,7 +281,7 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
         );
     vi.stubGlobal('fetch', fetchRanking);
     const tracker = mockCamera();
-    const wrapper = mount(SessionPanel);
+    const wrapper = mountPanel();
     const button = (text: string) =>
         wrapper.findAll('button').find((item) => item.text() === text)!;
     await wrapper.get('input').setValue('Ola');

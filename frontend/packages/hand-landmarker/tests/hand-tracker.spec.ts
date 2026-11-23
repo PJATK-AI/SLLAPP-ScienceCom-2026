@@ -233,6 +233,43 @@ describe('createHandTracker', () => {
         );
     });
 
+    it('detects hands in the crop that the options give for each frame', async () => {
+        const drawImage = vi.fn();
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+            drawImage,
+        } as unknown as CanvasRenderingContext2D);
+        Object.defineProperty(video, 'videoWidth', { get: () => 640 });
+        Object.defineProperty(video, 'videoHeight', { get: () => 480 });
+        const cropOptions: HandTrackerOptions = { ...options, crop: null };
+        const tracker = createHandTracker(cropOptions);
+        await tracker.start(video);
+
+        runFrame();
+        expect(landmarker.detectForVideo).toHaveBeenLastCalledWith(video, expect.any(Number));
+
+        cropOptions.crop = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+        runFrame();
+        const canvas = landmarker.detectForVideo.mock.lastCall?.[0] as HTMLCanvasElement;
+        expect(canvas).toBeInstanceOf(HTMLCanvasElement);
+        expect([canvas.width, canvas.height]).toEqual([320, 240]);
+        expect(drawImage).toHaveBeenCalledWith(video, 160, 120, 320, 240, 0, 0, 320, 240);
+    });
+
+    it('reports a detection error when the browser cannot crop the image', async () => {
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+        const tracker = createHandTracker({
+            ...options,
+            crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
+        });
+        const onError = vi.fn();
+        tracker.onError(onError);
+        await tracker.start(video);
+        runFrame();
+
+        expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'detection-failed' }));
+        expect(tracker.isRunning).toBe(false);
+    });
+
     it('returns null when no hand is detected', async () => {
         const tracker = createHandTracker(options);
         const onResult = vi.fn();
