@@ -55,9 +55,7 @@ watch(running, (state) => {
         roundLength.value = { sessionId: state.sessionId, ms: state.remainingMs };
 });
 const timeProgress = computed(() =>
-    roundLength.value.ms > 0
-        ? Math.min(1, remainingMs.value / roundLength.value.ms)
-        : 1,
+    roundLength.value.ms > 0 ? Math.min(1, remainingMs.value / roundLength.value.ms) : 1,
 );
 
 const clock = computed(() => {
@@ -142,10 +140,16 @@ const gameError = computed(() => {
                         </p>
                         <span class="accent" aria-hidden="true"></span>
                         <h2>Przeliteruj<br />słowo.</h2>
-                        <p>Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu palcowego.</p>
+                        <p>
+                            Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu
+                            palcowego.
+                        </p>
                         <slot name="setup-extra" />
                     </div>
-                    <form class="setup-card" @submit.prevent="createSession({ nickname, selectedHand })">
+                    <form
+                        class="setup-card"
+                        @submit.prevent="createSession({ nickname, selectedHand })"
+                    >
                         <fieldset :disabled="pendingAction !== null">
                             <label class="label" for="nickname">Twój nick</label>
                             <div class="nick-row">
@@ -251,12 +255,21 @@ const gameError = computed(() => {
                             >
                                 Zakończ grę
                             </button>
-                            <span v-else class="end-confirm" role="group" aria-label="Zakończyć grę?">
+                            <span
+                                v-else
+                                class="end-confirm"
+                                role="group"
+                                aria-label="Zakończyć grę?"
+                            >
                                 <span class="end-question">Zakończyć grę?</span>
                                 <button type="button" class="end-action danger" @click="endGame">
                                     Tak, zakończ
                                 </button>
-                                <button type="button" class="end-action" @click="confirmEnd = false">
+                                <button
+                                    type="button"
+                                    class="end-action"
+                                    @click="confirmEnd = false"
+                                >
                                     Graj dalej
                                 </button>
                             </span>
