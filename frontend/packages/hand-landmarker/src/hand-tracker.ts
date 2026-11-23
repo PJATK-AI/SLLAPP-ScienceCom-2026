@@ -5,6 +5,8 @@ import {
     type HandLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 import { HandTrackerError, type Hand, type HandTracker, type HandTrackerOptions } from './models';
+import { openCamera, stopStream } from './camera';
+import { createFrameCropper, normalizeCrop } from './crop-frame';
 import { selectHand } from './select-hand';
 
 type ResultCallback = Parameters<HandTracker['onResult']>[0];
@@ -28,6 +30,7 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
     let disposed = false;
     // Increases at each stop, so that a start that is still in progress can see that it was cancelled.
     let session = 0;
+    const cropFrame = createFrameCropper();
 
     function loadLandmarker(): Promise<HandLandmarker> {
         landmarkerPromise ??= createLandmarker(options).catch((cause: unknown) => {
@@ -60,7 +63,8 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
             const timestamp = performance.now();
             let result: HandLandmarkerResult;
             try {
-                result = landmarker.detectForVideo(video, timestamp);
+                const frame = cropFrame(video, normalizeCrop(options.crop));
+                result = landmarker.detectForVideo(frame, timestamp);
             } catch (cause) {
                 stop();
                 reportError(
@@ -218,34 +222,6 @@ async function createLandmarker(options: HandTrackerOptions): Promise<HandLandma
     } catch {
         // The GPU delegate needs WebGL. Without it, use the CPU.
         return HandLandmarker.createFromOptions(fileset, landmarkerOptions('CPU'));
-    }
-}
-
-async function openCamera(): Promise<MediaStream> {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        throw new HandTrackerError(
-            'camera-unavailable',
-            'This browser does not support camera access.',
-        );
-    }
-    try {
-        return await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user' },
-            audio: false,
-        });
-    } catch (cause) {
-        const denied =
-            cause instanceof DOMException &&
-            (cause.name === 'NotAllowedError' || cause.name === 'SecurityError');
-        throw denied
-            ? new HandTrackerError('camera-denied', 'Camera access was denied.', { cause })
-            : new HandTrackerError('camera-unavailable', 'The camera is not available.', { cause });
-    }
-}
-
-function stopStream(mediaStream: MediaStream): void {
-    for (const track of mediaStream.getTracks()) {
-        track.stop();
     }
 }
 

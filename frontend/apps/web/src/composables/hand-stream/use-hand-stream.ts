@@ -1,4 +1,9 @@
-import { normalizeHandForModel, useHandTracker, type Hand } from '@sllapp/hand-landmarker-vue';
+import {
+    normalizeHandForModel,
+    useHandTracker,
+    type CameraCrop,
+    type Hand,
+} from '@sllapp/hand-landmarker-vue';
 import { ref, watch, type Ref } from 'vue';
 import type { HandSampleData, SelectedHand } from '@/models/game-session';
 
@@ -12,6 +17,7 @@ export interface HandStreamSession {
 export function useHandStream(
     video: Readonly<Ref<HTMLVideoElement | null>>,
     session: HandStreamSession,
+    crop?: Readonly<Ref<CameraCrop | null>>,
 ) {
     const hz = Number(import.meta.env.VITE_HAND_SAMPLE_HZ?.trim() || 10);
     const interval = 1000 / hz;
@@ -30,6 +36,10 @@ export function useHandStream(
             wasmPath: import.meta.env.VITE_HAND_LANDMARKER_WASM_PATH?.trim() || '/mediapipe/wasm',
             get preferredHand() {
                 return session.selectedHand === 'LEFT' ? 'Left' : 'Right';
+            },
+            // Read for each frame, so a crop saved in the settings applies to a running camera.
+            get crop() {
+                return crop?.value ?? null;
             },
         },
         onFrame,

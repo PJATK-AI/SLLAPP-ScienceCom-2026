@@ -1,15 +1,30 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, useTemplateRef, watch } from 'vue';
+import { useCameraSettings } from '@/composables/camera-settings';
 import { useHandStream, type HandStreamSession } from '@/composables/hand-stream/use-hand-stream';
 import BrainRaster from './BrainRaster.vue';
 
 const props = defineProps<HandStreamSession>();
 const emit = defineEmits<{ active: [value: boolean] }>();
 const video = useTemplateRef<HTMLVideoElement>('video');
+const { crop } = useCameraSettings();
 const { hand, start, stop, isRunning, error, frameError, configurationError } = useHandStream(
     video,
     props,
+    crop,
 );
+// The tracker detects hands in the crop and gives landmarks relative to it, so the preview shows
+// the same crop: the video is enlarged and moved so that the crop fills the frame.
+const videoStyle = computed(() => {
+    const value = crop.value;
+    if (!value) return {};
+    return {
+        width: `${100 / value.width}%`,
+        height: `${100 / value.height}%`,
+        left: `${(-value.x / value.width) * 100}%`,
+        top: `${(-value.y / value.height) * 100}%`,
+    };
+});
 const seesHand = computed(() => hand.value?.handedness.toUpperCase() === props.selectedHand);
 const showHand = computed(() => isRunning.value && !!hand.value && seesHand.value);
 const wrongHand = computed(() => isRunning.value && !!hand.value && !seesHand.value);
@@ -78,6 +93,7 @@ onScopeDispose(() => emit('active', false));
                     <div class="frame" :style="{ '--aspect': aspect }">
                         <video
                             ref="video"
+                            :style="videoStyle"
                             muted
                             playsinline
                             aria-label="Podgląd kamery"
@@ -174,10 +190,14 @@ onScopeDispose(() => emit('active', false));
     top: 50%;
     width: max(100cqw, calc(100cqh * var(--aspect)));
     height: max(100cqh, calc(100cqw / var(--aspect)));
+    overflow: hidden;
     /* Mirror the preview and its landmarks together, like a selfie camera. */
     transform: translate(-50%, -50%) scaleX(-1);
 }
 video {
+    position: absolute;
+    left: 0;
+    top: 0;
     display: block;
     width: 100%;
     height: 100%;

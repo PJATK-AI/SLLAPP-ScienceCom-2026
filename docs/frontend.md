@@ -30,6 +30,20 @@ Use the regular backend with [prediction enabled](local-development.md#enable-pr
 to score gestures. The default sample rate is 10 Hz. The client skips intermediate
 frames and frames produced while the socket has buffered data.
 
+## Camera crop
+
+The gear button on the right of the header opens **Ustawienia kamery**. It
+shows the camera preview with a crop frame. Set **Przybliżenie** (1× to 3×)
+and drag the frame, or select it and use the arrow keys. **Zapisz** stores the
+crop in `localStorage` (`sllapp-camera-crop`) in this browser. **Pełny obraz**
+removes the crop.
+
+The game camera shows only the saved crop. The tracker gives MediaPipe only
+this part of each frame, so hands outside it are not detected. The landmarks
+are then normalized to the crop. The crop keeps the camera's aspect ratio, so
+the points sent to the model are not stretched. A crop saved while the camera
+runs applies from the next frame.
+
 ## Round diagnostics
 
 Run `pnpm dev:diagnostics` from `frontend/` and enable WebSocket diagnostics
