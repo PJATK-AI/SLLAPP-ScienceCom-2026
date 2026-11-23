@@ -74,6 +74,11 @@ function endGame() {
     confirmEnd.value = false;
     resetSession();
 }
+const hint = computed(() => {
+    if (running.value?.requiresRelease)
+        return 'Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.';
+    return remainingSeconds.value === 0 && isReady.value ? 'Czekamy na wynik rundy…' : '';
+});
 const lowTime = computed(() => !!running.value && remainingSeconds.value <= 10);
 const handName = computed(() =>
     (gameState.value?.selectedHand ?? selectedHand.value) === 'LEFT' ? 'lewą' : 'prawą',
@@ -309,12 +314,7 @@ const gameError = computed(() => {
                         >
                     </p>
 
-                    <p v-if="running.requiresRelease" class="hint" role="status">
-                        Wyjmij dłoń z kadru, a potem zamigaj tę literę ponownie.
-                    </p>
-                    <p v-else-if="remainingSeconds === 0 && isReady" class="hint" role="status">
-                        Czekamy na wynik rundy…
-                    </p>
+                    <p class="hint" :class="{ empty: !hint }" role="status">{{ hint }}</p>
 
                     <div class="scoreline">
                         <p class="label">
@@ -719,6 +719,9 @@ h2 {
     animation: pop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
 }
 .hint {
+    min-height: 3.2em;
+    display: grid;
+    place-items: center;
     margin: 0;
     padding: 0.8em 1.1em;
     border-radius: var(--radius);
@@ -726,6 +729,9 @@ h2 {
     font-weight: 600;
     font-size: clamp(1rem, 2.2vmin, 1.6rem);
     text-align: center;
+}
+.hint.empty {
+    background: transparent;
 }
 .scoreline {
     display: flex;
@@ -860,6 +866,46 @@ h2 {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr);
         align-items: center;
+    }
+}
+
+/* Portrait kiosk (e.g. a 32" screen on its side): size type by width, which is the short side. */
+@media (orientation: portrait) {
+    .setup {
+        align-content: space-evenly;
+    }
+    .hero-mark {
+        font-size: clamp(2rem, 8vw, 6rem);
+    }
+    .hero h2 {
+        font-size: clamp(2.6rem, 12.5vw, 9.5rem);
+    }
+    .hero p {
+        max-width: 46rem;
+        font-size: clamp(1.05rem, 3.6vw, 2.5rem);
+    }
+    .setup-card > fieldset {
+        gap: calc(var(--pad) * 0.8);
+    }
+    .ready-copy h2,
+    .result-summary h2 {
+        font-size: clamp(2.2rem, 10vw, 7.5rem);
+    }
+    .ready-copy p {
+        font-size: clamp(1rem, 3.4vw, 2.3rem);
+    }
+    .hint {
+        font-size: clamp(1rem, 2.8vw, 2rem);
+    }
+    .scoreline .label {
+        font-size: clamp(0.8rem, 2.2vw, 1.6rem);
+    }
+    /* Keep the brain motif beside the score disc, away from the ranking numbers. */
+    .result .decor-brain {
+        top: 14vh;
+        bottom: auto;
+        right: -12vw;
+        width: 58vw;
     }
 }
 

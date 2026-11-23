@@ -239,6 +239,17 @@ main {
 .brand .school-logo {
     height: clamp(2rem, 4.4vmin, 3.4rem);
 }
+@media (orientation: portrait) {
+    .header-mark {
+        font-size: clamp(1.8rem, 6.4vw, 4.6rem);
+    }
+    .brand .school-logo {
+        height: clamp(2rem, 5vw, 3.8rem);
+    }
+    main:has(.is-setup) .app-header .brand .school-logo {
+        height: clamp(2.8rem, 8vw, 6.4rem);
+    }
+}
 /* Start screen: the school logo leads in the header, the club logo is the big hero mark. */
 main:has(.is-setup) .header-mark,
 main:has(.is-setup) .brand-divider {

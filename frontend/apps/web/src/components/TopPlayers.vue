@@ -52,6 +52,14 @@ li {
 li:first-child .rank {
     color: var(--red);
 }
+@media (orientation: portrait) {
+    .top-players {
+        max-width: 40rem;
+    }
+    li {
+        font-size: clamp(0.95rem, 3vw, 2.2rem);
+    }
+}
 .name {
     overflow: hidden;
     text-overflow: ellipsis;

@@ -84,6 +84,11 @@ td:last-child {
     text-align: right;
     font-family: var(--font-display);
 }
+@media (orientation: portrait) {
+    table {
+        font-size: clamp(1rem, 3vw, 2.2rem);
+    }
+}
 tr.me td {
     color: var(--red);
     font-weight: 700;
