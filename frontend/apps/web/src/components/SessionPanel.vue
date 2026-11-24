@@ -141,8 +141,7 @@ const gameError = computed(() => {
                         <span class="accent" aria-hidden="true"></span>
                         <h2>Przeliteruj<br />słowo.</h2>
                         <p>
-                            Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu
-                            migowego.
+                            Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu migowego.
                         </p>
                         <slot name="setup-extra" />
                     </div>

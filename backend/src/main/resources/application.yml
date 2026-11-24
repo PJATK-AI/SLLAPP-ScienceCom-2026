@@ -21,7 +21,7 @@ sllapp:
       # Apply the same multiplier as for letter points.
       word-bonus: 20
       # Increase in the multiplier for each letter beyond three.
-      # With a step of 1, three-letter words use ×1 and four-letter words use ×2.
+      # With a step of 2, three-letter words use ×1 and four-letter words use ×3.
       multiplier-step: 2
     recognition:
       # Lowest confidence at which a prediction of the expected letter qualifies.

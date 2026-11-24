@@ -68,7 +68,7 @@ expiry uses the instant itself.
 The immutable `GameRules` takes a maximum word length of at least 3 and
 nonnegative `BigDecimal` scoring values.
 
-| Setting | Default |
+| Setting | Standalone default |
 | --- | ---: |
 | `maxWordLength` | 7 |
 | `letterPoints` | 10 |
@@ -79,8 +79,9 @@ For a word of length `L`, the multiplier is `1 + (L - 3) × multiplierStep`.
 Each accepted position adds the scaled letter award. The last position
 also adds the scaled word bonus for the same word. The engine rounds
 each award separately to the nearest integer with halves rounded up.
-With the default rules, completing a three-letter word adds 50 points and a
-four-letter word adds 120.
+The standalone rules award 50 points for a three-letter word and 120 for
+a four-letter word. The default configuration for regular rounds uses a
+multiplier step of 2, which gives 50 and 180 points respectively.
 Score overflow raises an arithmetic error before the engine changes the
 position or draws the next word.
 
@@ -110,8 +111,9 @@ WebSocket clients.
 `model.GameSession` holds player metadata and the game lifecycle. `SessionService`
 keeps sessions in memory and validates player names through `NicknamePolicy`.
 `BlockedWordList` reads `sllapp.moderation.blocked-words-location` once at startup.
-On start, the session creates a `GameEngine` with `GameRules.defaults()` and its
-own picker. The production picker factory shares the bundled `WordCatalog`.
+On start, the session creates a `GameEngine` with the configured `GameRules`
+and its own picker. The production picker factory shares the bundled
+`WordCatalog`.
 
 `SessionWebSocketHandler` dispatches `create_session`, `resume_session`,
 `start_game`, `hand_sample` and `no_hand`. `SessionConnectionRegistry` tracks

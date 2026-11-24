@@ -25,4 +25,7 @@ digits or punctuation were excluded, not split into separate words.
 The source covers profanity, insults and sexual terms. It is not an exhaustive
 list of offensive nicknames or Polish inflections.
 
+The project adds entries for the number 67 and related Polish and English
+nicknames.
+
 The application loads this local copy at startup; it does not download updates.

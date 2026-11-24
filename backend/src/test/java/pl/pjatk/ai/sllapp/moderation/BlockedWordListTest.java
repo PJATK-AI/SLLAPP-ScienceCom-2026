@@ -35,8 +35,23 @@ class BlockedWordListTest {
         var list = load("classpath:moderation/blocked-words.txt");
         assertThat(list.containsBlockedWord("skurwysyn")).isTrue();
         assertThat(list.containsBlockedWord("motherfucker")).isTrue();
+        assertThat(list.containsBlockedWord("67")).isTrue();
+        assertThat(list.containsBlockedWord("Sześć Siedem")).isTrue();
         assertThat(list.containsBlockedWord("Ola")).isFalse();
         assertThat(list.containsBlockedWord("Łucja")).isFalse();
+    }
+
+    @Test
+    void blocksCompleteNumbersAndConsecutivePhraseTokens() throws Exception {
+        var file = directory.resolve("words.txt");
+        Files.writeString(file, "67\nsix \t seven\nsześć siedem\n");
+        var list = load(file.toUri().toString());
+        for (String nickname : new String[]{"Ola67", "６７", "Six Seven", "SIX-seven", "SZEŚĆ SIEDEM"}) {
+            assertThat(list.containsBlockedWord(nickname)).as(nickname).isTrue();
+        }
+        for (String nickname : new String[]{"167", "670", "six", "six8seven", "seven six", "six seventies"}) {
+            assertThat(list.containsBlockedWord(nickname)).as(nickname).isFalse();
+        }
     }
 
     @Test
@@ -60,10 +75,10 @@ class BlockedWordListTest {
         Files.writeString(file, "# Only comments\n\n");
         assertThatIllegalStateException().isThrownBy(() -> load(file.toUri().toString()))
                 .withMessageContaining("Blocked-word list is empty");
-        for (String invalid : new String[]{"two words", "bad*", "bad123"}) {
+        for (String invalid : new String[]{"two-words", "bad*", "bad123"}) {
             Files.writeString(file, "# Comment\nbad\n" + invalid);
             assertThatIllegalStateException().isThrownBy(() -> load(file.toUri().toString()))
-                    .withMessageContaining("Invalid blocked-word entry").withMessageContaining(":3;");
+                    .withMessageContaining("Invalid blocked-word entry").withMessageContaining(":3.");
         }
     }
 

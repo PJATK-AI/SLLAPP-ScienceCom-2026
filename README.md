@@ -93,7 +93,7 @@ directory, pass `--model path/to/model.joblib`. For the Vue game, start the
 
 By default, the backend completes the active letter after at least three
 matching predictions with confidence of `0.80` or higher. The accepted samples
-must span at least `400ms`, with at most `350ms` between consecutive samples
+must span at least `250ms`, with at most `350ms` between consecutive samples
 in the series. Two consecutive `no_hand` messages unlock a repeated letter.
 [Recognition rules and settings](docs/api.md#letter-recognition)
 
