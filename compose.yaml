@@ -18,6 +18,12 @@ services:
         {"sllapp":{"web":{"allowed-origins":["http://127.0.0.1:8088","http://localhost:8088"]}}}
     volumes:
       - ranking:/data
+      - type: bind
+        source: ./backend/src/main/resources/application.yml
+        target: /app/config/application.yml
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       model:
         condition: service_healthy

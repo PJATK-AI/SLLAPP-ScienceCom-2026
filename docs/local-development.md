@@ -41,6 +41,18 @@ stop and remove the containers, use `docker compose down`. The named
 with the same Compose project name. `docker compose down -v` also deletes
 that volume and its saved scores.
 
+To tune round timing, scoring or recognition, wait until the current round
+ends and edit `backend/src/main/resources/application.yml`. Compose mounts
+this file read-only at `/app/config/application.yml`. From the repository
+root, recreate the backend to read the new settings:
+
+```sh
+docker compose up -d --force-recreate backend
+```
+
+Recreating the backend clears in-memory sessions. Saved results stay in the
+`ranking` volume. [Gameplay settings](api.md#websocket-configuration)
+
 ## Windows quick start
 
 Use PowerShell. In terminal 1, from the repository root:

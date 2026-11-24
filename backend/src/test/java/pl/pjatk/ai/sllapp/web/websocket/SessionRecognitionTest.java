@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -25,6 +26,7 @@ import pl.pjatk.ai.sllapp.config.moderation.ModerationProperties;
 import pl.pjatk.ai.sllapp.config.session.RecognitionProperties;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
+import pl.pjatk.ai.sllapp.game.GameRules;
 import pl.pjatk.ai.sllapp.model.GameResult;
 import pl.pjatk.ai.sllapp.model.SelectedHand;
 import pl.pjatk.ai.sllapp.moderation.BlockedWordList;
@@ -49,7 +51,9 @@ import static org.mockito.Mockito.when;
 class SessionRecognitionTest {
     private static final Duration ROUND = Duration.ofMinutes(1);
     private static final Prediction A = new Prediction('A', 0.80);
-    private static final RecognitionProperties DEFAULTS = new RecognitionProperties(0.80, 3, Duration.ofMillis(350), 2);
+    private static final Duration MAX_SAMPLE_GAP = Duration.ofMillis(350);
+    private static final Duration MIN_HOLD = Duration.ofMillis(400);
+    private static final RecognitionProperties DEFAULTS = new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, MIN_HOLD);
     private final ObjectMapper mapper = new ObjectMapper();
     private final MutableClock clock = new MutableClock();
     private final AtomicLong sampleNanos = new AtomicLong();
@@ -58,12 +62,68 @@ class SessionRecognitionTest {
     private final List<CompletableFuture<PredictionResult>> calls = new ArrayList<>();
     private final SessionService sessions = new SessionService(clock,
             new SessionProperties(Duration.ofMinutes(5), ROUND, Duration.ofMinutes(5)),
+            GameRules.defaults(),
             new NicknamePolicy(new BlockedWordList(new ModerationProperties("classpath:moderation/test-blocked-words.txt"),
                     new DefaultResourceLoader())), () -> length -> length == 3 ? "AAB" : "B".repeat(length), results);
     private SessionConnectionRegistry connections;
     private SessionWebSocketHandler handler;
     private UUID id;
     private SelectedHand selectedHand;
+
+    @ParameterizedTest
+    @ValueSource(longs = {400, 600})
+    void advancesExactlyOnceAtTheHoldThreshold(long holdMs) throws Exception {
+        var socket = start(new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, Duration.ofMillis(holdMs)));
+        predict(socket, A);
+        predictAAfter(socket, 100);
+        predictAAfter(socket, 100);
+        assertState(socket, 1, 0, false);
+        if (holdMs == 600) predictAAfter(socket, 200);
+        predictAAfter(socket, 199);
+        assertState(socket, 1, 0, false);
+        assertThat(socket.states()).hasSize(2);
+        predictAAfter(socket, 1);
+        assertState(socket, 2, 10, true);
+        socket.hand(1);
+        socket.hand(2);
+        assertThat(socket.states()).hasSize(3);
+        assertState(socket, 2, 10, true);
+    }
+
+    @Test
+    void waitsForEnoughPredictionsWhenTheHoldThresholdIsReachedFirst() throws Exception {
+        var socket = start(new RecognitionProperties(0.80, 4, MAX_SAMPLE_GAP, 2, MIN_HOLD));
+        predict(socket, A);
+        predictAAfter(socket, 200);
+        predictAAfter(socket, 200);
+        assertState(socket, 1, 0, false);
+        predictAAfter(socket, 1);
+        assertState(socket, 2, 10, true);
+    }
+
+    @Test
+    void allowsCountOnlyRecognitionWhenTheHoldDurationIsZero() throws Exception {
+        var socket = start(new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, Duration.ZERO));
+        predict(socket, A);
+        predict(socket, A);
+        assertState(socket, 1, 0, false);
+        predict(socket, A);
+        assertState(socket, 2, 10, true);
+    }
+
+    @Test
+    void measuresHoldFromSampleAcceptanceInsteadOfPredictionCompletion() throws Exception {
+        var socket = start(DEFAULTS);
+        predict(socket, A);
+        predictAAfter(socket, 200);
+        advance(199);
+        socket.hand(1);
+        advance(150);
+        lastCall().complete(A);
+        assertState(socket, 1, 0, false);
+        predict(socket, A);
+        assertState(socket, 2, 10, true);
+    }
 
     @Test
     void completesAtTheConfidenceAndSampleGapBoundaries() throws Exception {
@@ -87,7 +147,8 @@ class SessionRecognitionTest {
     void restartsTheStreakAfterAnInterruption(Interruption interruption) throws Exception {
         var socket = start(DEFAULTS);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 100);
+        predictAAfter(socket, 100);
         switch (interruption) {
             case ANOTHER_LETTER -> predict(socket, new Prediction('B', 1));
             case LOW_CONFIDENCE -> predict(socket, new Prediction('A', Math.nextDown(0.80)));
@@ -106,9 +167,10 @@ class SessionRecognitionTest {
         }
         assertState(socket, 1, 0, false);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
+        predictAAfter(socket, 199);
         assertState(socket, 1, 0, false);
-        predict(socket, A);
+        predictAAfter(socket, 1);
         assertState(socket, 2, 10, true);
     }
 
@@ -116,18 +178,18 @@ class SessionRecognitionTest {
     void startsANewStreakWithTheFirstGoodPredictionAfterAGap() throws Exception {
         var socket = start(DEFAULTS);
         predict(socket, A);
-        predict(socket, A);
-        advance(351);
-        predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
+        predictAAfter(socket, 351);
+        predictAAfter(socket, 200);
+        predictAAfter(socket, 199);
         assertState(socket, 1, 0, false);
-        predict(socket, A);
+        predictAAfter(socket, 1);
         assertState(socket, 2, 10, true);
     }
 
     @Test
     void usesConfiguredConfidenceAndGap() throws Exception {
-        var socket = start(new RecognitionProperties(0.90, 2, Duration.ofMillis(100), 2));
+        var socket = start(new RecognitionProperties(0.90, 2, Duration.ofMillis(100), 2, Duration.ZERO));
         var confident = new Prediction('A', 0.90);
         predict(socket, confident);
         predict(socket, A);
@@ -170,7 +232,7 @@ class SessionRecognitionTest {
                 previousMs = timestampMs;
             }
         }
-        assertThat(calls).hasSize(6);
+        assertThat(calls).hasSize(8);
         assertThat(socket.states()).hasSize(4);
     }
 
@@ -191,15 +253,15 @@ class SessionRecognitionTest {
         assertState(socket, 1, 0, false);
         assertThat(calls).hasSize(3);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
         assertState(socket, 1, 0, false);
-        predict(socket, A);
+        predictAAfter(socket, 200);
         assertState(socket, 2, 10, true);
     }
 
     @Test
     void ignoresAResponseForThePreviousPositionEvenWhenItRepeatsTheLetter() throws Exception {
-        var socket = start(new RecognitionProperties(0.80, 1, Duration.ofMillis(350), 1));
+        var socket = start(new RecognitionProperties(0.80, 1, MAX_SAMPLE_GAP, 1, Duration.ZERO));
         socket.hand(1);
         var game = sessions.find(id).orElseThrow();
         assertThat(connections.completePosition(game, 1)).isTrue();
@@ -216,7 +278,8 @@ class SessionRecognitionTest {
     void publishesAndPersistsTheFinalScoreWhenPredictionArrivesAtTheDeadline() throws Exception {
         var socket = start(DEFAULTS);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
+        advance(200);
         socket.hand(1);
         clock.advance(ROUND);
         lastCall().complete(A);
@@ -228,7 +291,7 @@ class SessionRecognitionTest {
 
     @Test
     void releaseSurvivesResumeButPartialCountsAndOtherHandsInterruptIt() throws Exception {
-        var old = start(new RecognitionProperties(0.80, 1, Duration.ofMillis(350), 2));
+        var old = start(new RecognitionProperties(0.80, 1, MAX_SAMPLE_GAP, 2, Duration.ZERO));
         predict(old, A);
         old.noHand(2);
         old.hand(2);
@@ -257,7 +320,7 @@ class SessionRecognitionTest {
     @ParameterizedTest
     @EnumSource(SocketChange.class)
     void keepsTheCallSlotAcrossDisconnectAndRejectsOldResponses(SocketChange change) throws Exception {
-        var old = start(new RecognitionProperties(0.80, 1, Duration.ofMillis(350), 2));
+        var old = start(new RecognitionProperties(0.80, 1, MAX_SAMPLE_GAP, 2, Duration.ZERO));
         old.hand(1);
         var pending = lastCall();
         if (change == SocketChange.CLOSE) handler.afterConnectionClosed(old.socket, CloseStatus.NORMAL);
@@ -272,6 +335,32 @@ class SessionRecognitionTest {
     }
 
     @Test
+    void startsAFreshSeriesAfterResumeAndAfterReleasingARepeatedLetter() throws Exception {
+        var first = start(DEFAULTS);
+        predict(first, A);
+        predictAAfter(first, 200);
+        advance(200);
+
+        var current = resume();
+        predict(current, A);
+        predictAAfter(current, 200);
+        predictAAfter(current, 199);
+        assertState(current, 1, 0, false);
+        predictAAfter(current, 1);
+        assertState(current, 2, 10, true);
+
+        current.noHand(2);
+        current.noHand(2);
+        assertState(current, 2, 10, false);
+        predict(current, A);
+        predictAAfter(current, 200);
+        predictAAfter(current, 199);
+        assertState(current, 2, 10, false);
+        predictAAfter(current, 1);
+        assertState(current, 3, 20, false);
+    }
+
+    @Test
     void recoversFromAnImmediateFailureAndASubmissionException() throws Exception {
         var socket = start(DEFAULTS);
         predict(socket, A);
@@ -282,9 +371,9 @@ class SessionRecognitionTest {
         socket.hand(1);
         socket.hand(1);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
         assertState(socket, 1, 0, false);
-        predict(socket, A);
+        predictAAfter(socket, 200);
         assertState(socket, 2, 10, true);
     }
 
@@ -303,11 +392,11 @@ class SessionRecognitionTest {
     void ignoresInvalidPositionsAndDuplicateSequencesBeforeRecognition() throws Exception {
         var socket = start(DEFAULTS);
         predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
         socket.send(SampleFixtures.noHand(30).replace("null", "2"));
         assertThat(socket.messages.getLast().path("code").asString()).isEqualTo("INVALID_SAMPLE");
         socket.send(SampleFixtures.noHand(1).replace("null", "1"));
-        predict(socket, A);
+        predictAAfter(socket, 200);
         assertState(socket, 2, 10, true);
     }
 
@@ -334,8 +423,8 @@ class SessionRecognitionTest {
         assertThat(failure.has("letter")).isFalse();
         assertThat(failure.toString()).doesNotContain("Private inference detail");
         predict(socket, A);
-        predict(socket, A);
-        predict(socket, A);
+        predictAAfter(socket, 200);
+        predictAAfter(socket, 200);
         assertState(socket, 2, 10, true);
         assertThat(socket.messages.getLast().path("disposition").asString()).isEqualTo("POSITION_COMPLETED");
     }
@@ -409,9 +498,14 @@ class SessionRecognitionTest {
 
     private void predict(RecordingSocket socket, PredictionResult response) throws IOException {
         int previousCount = calls.size();
-        socket.hand(1);
+        socket.hand(socket.states().getLast().path("positionId").asLong());
         assertThat(calls).hasSize(previousCount + 1);
         lastCall().complete(response);
+    }
+
+    private void predictAAfter(RecordingSocket socket, long milliseconds) throws IOException {
+        advance(milliseconds);
+        predict(socket, A);
     }
 
     private void advance(long milliseconds) {

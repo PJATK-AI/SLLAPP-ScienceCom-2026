@@ -6,6 +6,38 @@ spring:
       mode: always
 
 sllapp:
+  session:
+    # Time from the backend accepting the start request to the round deadline.
+    game-duration: 60s
+    # Time available to start a round after creating a session.
+    creation-ttl: 5m
+    # Time to reconnect to a finished session, measured from the round deadline.
+    finished-ttl: 5m
+  game:
+    scoring:
+      # Base points for a correct letter, before applying the multiplier.
+      letter-points: 10
+      # Base bonus added after completing the last letter of a word.
+      # Apply the same multiplier as for letter points.
+      word-bonus: 20
+      # Increase in the multiplier for each letter beyond three.
+      # With a step of 1, three-letter words use ×1 and four-letter words use ×2.
+      multiplier-step: 1
+    recognition:
+      # Lowest confidence at which a prediction of the expected letter qualifies.
+      # A value of 0.80 means an inclusive threshold of 80%.
+      min-confidence: 0.80
+      # Number of consecutive qualifying predictions required to accept a letter.
+      required-predictions: 3
+      # Maximum gap between samples that count toward the same series.
+      # After a longer gap, the current qualifying sample starts a new series.
+      max-sample-gap: 350ms
+      # Consecutive no_hand messages required to unlock the next position
+      # when the expected letter matches the previous letter.
+      release-no-hand-count: 2
+      # Minimum time between acceptance of the first and latest qualifying samples.
+      # Set to 0ms to disable the hold-time requirement.
+      min-hold-duration: 400ms
   ai:
     enabled: ${AI_PREDICTION_ENABLED:false}
     base-url: ${AI_PREDICTION_BASE_URL:}

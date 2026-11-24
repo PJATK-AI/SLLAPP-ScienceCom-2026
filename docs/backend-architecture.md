@@ -79,7 +79,8 @@ For a word of length `L`, the multiplier is `1 + (L - 3) × multiplierStep`.
 Each accepted position adds the scaled letter award. The last position
 also adds the scaled word bonus for the same word. The engine rounds
 each award separately to the nearest integer with halves rounded up.
-With the default rules, completing a 4-letter word adds 120 points.
+With the default rules, completing a three-letter word adds 50 points and a
+four-letter word adds 120.
 Score overflow raises an arithmetic error before the engine changes the
 position or draws the next word.
 
@@ -124,13 +125,15 @@ position before the connection advances its sequence. A `SampleMessage` retains
 the position ID and hand JSON, including additional fields. Diagnostic
 acknowledgements are controlled by `SessionWebSocketProperties`.
 
-`GameSession` holds `LetterRecognition`, which tracks the prediction streak,
-hand release and the single in-flight request. The registry reserves that slot
+`GameSession` holds `LetterRecognition`, which tracks the prediction count,
+the first and latest qualifying sample times, hand release and the single
+in-flight request. The registry reserves that slot
 under the session monitor and submits to `AiPredictionClient` outside the
 monitor. The completion callback acquires the monitor to release the slot and
 verify the running game, owning socket, active position and elapsed budget
-before updating the streak. Sample timing and the call budget use monotonic
-time. `SessionConnectionRegistry.completePosition` is the common path for
+before updating the series. Sample timing and the call budget use monotonic
+time. A series qualifies once its count and hold time reach their configured
+thresholds. `SessionConnectionRegistry.completePosition` is the common path for
 advancing the engine and publishing a confirmed completion. A hand release
 publishes a new state at the same position. See the
 [recognition rules and settings](api.md#letter-recognition).
@@ -303,11 +306,12 @@ file preserves saved results across application restarts.
 
 The `config` package contains Spring configuration and the types bound through
 `@ConfigurationProperties`. `StorageProperties` binds `sllapp.storage.directory`.
-Session, recognition, moderation and web defaults are declared in
-`SessionProperties`, `RecognitionProperties`, `ModerationProperties`,
-`SessionWebSocketProperties` and `WebProperties`.
-Creation expiry defaults to `5m`, game duration to `60s` and the finished resume
-window to `5m`. All three durations must be positive.
+The defaults for `SessionProperties`, `ScoringProperties` and
+`RecognitionProperties` are in `backend/src/main/resources/application.yml`.
+`SessionConfiguration` builds `GameRules` from the scoring settings, and
+`SessionService` passes those rules to the engine when a regular round starts.
+Creation expiry defaults to `5m`, game duration to `60s` and the finished
+resume window to `5m`. All three durations must be positive.
 See the [configuration table](api.md#websocket-configuration).
 The session registry is local to one application instance and is separate from
 SQLite result storage.

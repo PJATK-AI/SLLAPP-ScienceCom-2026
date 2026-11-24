@@ -41,6 +41,10 @@ After changing code, run `docker compose up --build`. To stop the stack, run
 `docker compose down` from another terminal. Rankings are stored in the named
 `ranking` volume and survive `down`. [Compose setup and troubleshooting](docs/local-development.md#docker-compose)
 
+Edit `backend/src/main/resources/application.yml` to tune round timing,
+scoring and recognition between rounds. Apply those changes with
+`docker compose up -d --force-recreate backend`.
+
 ### Run from source
 
 **Requirements** · JDK 21 · Node.js 24.15+ · pnpm 12.21.0
@@ -87,10 +91,11 @@ Check [`/health`](http://127.0.0.1:8000/health). For an artifact in a different
 directory, pass `--model path/to/model.joblib`. For the Vue game, start the
 [regular backend with AI enabled](docs/local-development.md#enable-prediction-on-the-regular-backend).
 
-During a round, the backend completes the active letter after three matching
-predictions with confidence at least `0.80` and no more than `350ms` between
-their accepted samples by default. Two consecutive `no_hand` messages unlock
-a repeated letter. [Recognition rules and settings](docs/api.md#letter-recognition)
+By default, the backend completes the active letter after at least three
+matching predictions with confidence of `0.80` or higher. The accepted samples
+must span at least `400ms`, with at most `350ms` between consecutive samples
+in the series. Two consecutive `no_hand` messages unlock a repeated letter.
+[Recognition rules and settings](docs/api.md#letter-recognition)
 
 ## Local tools
 
@@ -141,6 +146,7 @@ tests cover the Vue game, WebSocket sessions, ranking and hand tracking.
 
 | Document | Contents |
 | --- | --- |
+| [Presentation quick start](docs/presentation-quick-start.md) | Docker Compose commands for the presentation crew |
 | [Local development](docs/local-development.md) | Startup commands, ports, profiles and troubleshooting |
 | [API reference](docs/api.md) | WebSocket protocol and ranking endpoint |
 | [Frontend](docs/frontend.md) | Camera tracking, sample handling and workspace structure |

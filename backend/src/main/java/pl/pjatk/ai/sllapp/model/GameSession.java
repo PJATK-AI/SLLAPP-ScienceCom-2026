@@ -38,11 +38,12 @@ public final class GameSession {
     public Instant expiresAt() { return expiresAt; }
     public LetterRecognition recognition() { return recognition; }
 
-    public boolean start(Instant now, Duration duration, Duration finishedTtl, Supplier<WordPicker> pickers) {
+    public boolean start(Instant now, Duration duration, Duration finishedTtl, GameRules rules,
+                         Supplier<WordPicker> pickers) {
         if (deadline != null || !now.isBefore(expiresAt)) return false;
         var deadline = now.plus(duration);
         var expiry = deadline.plus(finishedTtl);
-        engine = new GameEngine(GameRules.defaults(), pickers.get(), now, deadline);
+        engine = new GameEngine(rules, pickers.get(), now, deadline);
         this.deadline = deadline;
         expiresAt = expiry;
         return true;
