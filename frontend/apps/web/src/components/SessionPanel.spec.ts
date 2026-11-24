@@ -45,9 +45,12 @@ function mockCamera() {
     );
     return { frame: (hand: Hand | null, timestamp: number) => frame(hand, timestamp), stop };
 }
-function mountPanel() {
+function mountPanel(attachTo?: HTMLElement) {
     const cameraSettings: CameraSettingsContext = { crop: ref(null), saveCrop: vi.fn() };
-    return mount(SessionPanel, { global: { provide: { [CameraSettingsKey]: cameraSettings } } });
+    return mount(SessionPanel, {
+        attachTo,
+        global: { provide: { [CameraSettingsKey]: cameraSettings } },
+    });
 }
 class Socket extends EventTarget {
     static OPEN = 1;
@@ -266,6 +269,84 @@ it('shows exactly one reference crop for each supported letter', async () => {
     wrapper.unmount();
 });
 
+it('offers to reuse a nickname or focuses the field to enter a different one', async () => {
+    vi.stubGlobal('WebSocket', Socket);
+    vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+    const wrapper = mountPanel(document.body);
+    try {
+        const nickname = wrapper.get('#nickname');
+        const button = (text: string) =>
+            wrapper.findAll('button').find((item) => item.text() === text)!;
+        const form = wrapper.get('form');
+        await nickname.setValue('Ola');
+        await form.trigger('submit');
+        const socket = Socket.last;
+        socket.readyState = 1;
+        socket.dispatchEvent(new Event('open'));
+        socket.message({ type: 'error', code: 'NICKNAME_EXISTS', message: 'Confirm reuse' });
+        await nextTick();
+        expect(wrapper.get('#nickname-reuse-message').text()).toBe(
+            'Ten nick jest już w rankingu. Czy chcesz zagrać pod tym nickiem?',
+        );
+        expect(document.activeElement).toBe(button('Kontynuuj').element);
+
+        await button('Zmień nick').trigger('click');
+        expect(wrapper.find('#nickname-reuse-message').exists()).toBe(false);
+        expect(document.activeElement).toBe(nickname.element);
+        expect(Socket.last).toBe(socket);
+        await nickname.setValue('Jan');
+        await form.trigger('submit');
+        const newSocket = Socket.last;
+        newSocket.readyState = 1;
+        newSocket.dispatchEvent(new Event('open'));
+        expect(newSocket).not.toBe(socket);
+        expect(JSON.parse(newSocket.send.mock.calls[0]![0])).toEqual({
+            type: 'create_session',
+            nickname: 'Jan',
+            selectedHand: 'RIGHT',
+        });
+    } finally {
+        wrapper.unmount();
+    }
+});
+
+it('sends a confirmation from the form only for the nickname and hand that were checked', async () => {
+    vi.stubGlobal('WebSocket', Socket);
+    vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+    const wrapper = mountPanel();
+    try {
+        const form = wrapper.get('form');
+        await wrapper.get('#nickname').setValue('ola');
+        const challenge = async () => {
+            await form.trigger('submit');
+            const socket = Socket.last;
+            socket.readyState = 1;
+            socket.dispatchEvent(new Event('open'));
+            socket.message({ type: 'error', code: 'NICKNAME_EXISTS', message: 'Confirm reuse' });
+            await nextTick();
+        };
+        await challenge();
+        await wrapper.get('input[value="LEFT"]').setValue(true);
+        expect(wrapper.find('#nickname-reuse-message').exists()).toBe(false);
+        await challenge();
+        const continueButton = wrapper
+            .findAll('button')
+            .find((item) => item.text() === 'Kontynuuj')!;
+        await continueButton.trigger('click');
+        const confirmed = Socket.last;
+        confirmed.readyState = 1;
+        confirmed.dispatchEvent(new Event('open'));
+        expect(JSON.parse(confirmed.send.mock.calls[0]![0])).toEqual({
+            type: 'create_session',
+            nickname: 'ola',
+            selectedHand: 'LEFT',
+            confirmExistingNickname: true,
+        });
+    } finally {
+        wrapper.unmount();
+    }
+});
+
 it('plays and resumes a round, then keeps the final score through a ranking failure', async () => {
     vi.stubGlobal('WebSocket', Socket);
     vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
@@ -277,7 +358,7 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
         .fn()
         .mockRejectedValueOnce(new Error('offline'))
         .mockResolvedValueOnce(
-            new Response(JSON.stringify([{ rank: 1, nickname: 'Ola', score: 20 }])),
+            new Response(JSON.stringify([{ rank: 1, nickname: 'Ola', score: 100 }])),
         );
     vi.stubGlobal('fetch', fetchRanking);
     const tracker = mockCamera();
@@ -364,7 +445,8 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
 
     await button('Ponów').trigger('click');
     await flushPromises();
-    expect(wrapper.get('tbody').text()).toContain('Ola');
+    expect(wrapper.findAll('tbody td').map((cell) => cell.text())).toEqual(['01', 'Ola', '100']);
+    expect(wrapper.get('.final-score').text()).toBe('20 pkt');
     expect(fetchRanking).toHaveBeenCalledTimes(2);
     await button('Nowa sesja').trigger('click');
     expect(wrapper.find('form').exists()).toBe(true);

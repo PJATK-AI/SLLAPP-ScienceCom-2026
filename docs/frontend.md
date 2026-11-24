@@ -13,7 +13,9 @@ The source image is stored unchanged and licensed under
 ## Play a round
 
 1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
-   hand and click **Utwórz sesję**.
+   hand and click **Zaczynamy**. If the nickname already has a ranking entry,
+   click **Kontynuuj** to play under that nickname or **Zmień nick** to enter
+   a different one.
 2. Click **Uruchom kamerę** and allow camera access. The preview draws the 21
    landmarks of the selected hand in the original image coordinates. The points
    disappear when that hand leaves the frame.
@@ -23,8 +25,9 @@ The source image is stored unchanged and licensed under
    take your hand out of frame as prompted.
 4. If the connection drops, click **Wznów sesję**. The server returns the
    current position, time and score, or the final result after the deadline.
-5. When the round ends, the camera stops. The score stays visible while the
-   ranking loads. Use **Ponów** to retry the ranking or **Nowa sesja** to play again.
+5. When the round ends, the camera stops. The score from that round stays
+   visible while the ranking loads the best saved scores. Use **Ponów** to
+   retry the ranking or **Nowa sesja** to play again.
 
 Use the regular backend with [prediction enabled](local-development.md#enable-prediction-on-the-regular-backend)
 to score gestures. The default sample rate is 10 Hz. The client skips intermediate
@@ -93,7 +96,10 @@ with a single slash uses the page's host and port. It connects using `ws://`
 from an HTTP page and `wss://` from an HTTPS page. For source development,
 use an absolute URL such as `ws://127.0.0.1:8080/ws`.
 
-`createSession({ nickname, selectedHand })` opens a session. `startGame()`
+`createSession({ nickname, selectedHand })` requests a new session.
+`NICKNAME_EXISTS` lets the form offer confirmation. `confirmNicknameReuse()`
+resends that nickname and hand with `confirmExistingNickname: true` on a new
+socket. Editing the form clears the pending confirmation. `startGame()`
 sends one request and waits for the server to confirm the round. `reconnect()`
 opens a new socket and waits for the current server state. Both sample types
 carry `positionId: null` in `CREATED` and the active ID in `RUNNING`. They share

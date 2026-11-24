@@ -38,8 +38,9 @@ class RankingControllerTest {
             repository.save(new GameResult("low", "Earlier low score", 999, time.minusSeconds(1)));
             repository.save(new GameResult("a", "Łucja", 1000, time));
             for (int i = 0; i < 110; i++) {
-                repository.save(new GameResult("extra-" + i, "Player", i, time));
+                repository.save(new GameResult("extra-" + i, "Player " + i, i, time));
             }
+            repository.save(new GameResult("repeat", " player 3 ", 500, time.plusSeconds(1)));
             var defaultResponse = get(client, port, "");
             assertThat(defaultResponse.statusCode()).isEqualTo(200);
             var rows = mapper.readTree(defaultResponse.body());
@@ -49,6 +50,8 @@ class RankingControllerTest {
             assertThat(rows.get(1).get("nickname").asString()).isEqualTo("Later id");
             assertThat(rows.get(2).get("nickname").asString()).isEqualTo("Later time");
             assertThat(rows.get(3).get("score").asInt()).isEqualTo(999);
+            assertThat(rows.get(4).get("nickname").asString()).isEqualTo("Player 3");
+            assertThat(rows.get(4).get("score").asInt()).isEqualTo(500);
             for (int limit : new int[]{1, 2, 100}) {
                 var response = get(client, port, "?limit=" + limit);
                 assertThat(response.statusCode()).isEqualTo(200);

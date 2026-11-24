@@ -43,10 +43,17 @@ public class SessionService {
     }
 
     public GameSession create(String nickname, SelectedHand selectedHand) {
+        return create(nickname, selectedHand, false);
+    }
+
+    public GameSession create(String nickname, SelectedHand selectedHand, boolean confirmExistingNickname) {
         String validated = nicknames.validate(nickname);
         if (selectedHand == null) throw new IllegalArgumentException("Selected hand is required.");
+        var storedNickname = results.findNickname(validated);
+        if (storedNickname.isPresent() && !confirmExistingNickname) throw new NicknameExistsException();
         var now = clock.instant();
-        var session = new GameSession(UUID.randomUUID(), validated, selectedHand, now, now.plus(properties.creationTtl()));
+        var session = new GameSession(UUID.randomUUID(), storedNickname.orElse(validated), selectedHand,
+                now, now.plus(properties.creationTtl()));
         sessions.put(session.sessionId(), session);
         return session;
     }
@@ -83,7 +90,7 @@ public class SessionService {
         }
     }
 
-    /** A duplicate insert confirms the result is already stored. */
+    /** A completed write settles the round even when the existing record wins. */
     public void saveResult(GameSession session) {
         if (!session.hasPendingResult()) return;
         try {
@@ -93,5 +100,8 @@ public class SessionService {
             log.warn("Could not save the result for session {}. The next sweep will retry.",
                     session.sessionId(), exception);
         }
+    }
+
+    public static final class NicknameExistsException extends RuntimeException {
     }
 }

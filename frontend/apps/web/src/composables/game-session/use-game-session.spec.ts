@@ -206,6 +206,41 @@ it('ends a rejected create and allows retry', () => {
     client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
     expect(Socket.all).toHaveLength(2);
 });
+it('retries an occupied nickname only after explicit confirmation', () => {
+    const { client, socket } = setup();
+    socket.open();
+    socket.message({ type: 'error', code: 'NICKNAME_EXISTS', message: 'Confirm reuse' });
+
+    expect(client.nicknameConfirmation.value).toMatchObject({
+        nickname: 'Ola',
+        selectedHand: 'RIGHT',
+    });
+    expect(client.error.value).toBeNull();
+    expect(client.pendingAction.value).toBeNull();
+    expect(socket.close).toHaveBeenCalledOnce();
+    client.createSession({ nickname: 'Ola', selectedHand: 'RIGHT' });
+    expect(Socket.all).toHaveLength(1);
+
+    client.confirmNicknameReuse();
+    client.confirmNicknameReuse();
+    expect(Socket.all).toHaveLength(2);
+    expect(client.nicknameConfirmation.value).toBeNull();
+    socket.message(state);
+    expect(client.gameState.value).toBeNull();
+
+    const retried = Socket.all[1]!;
+    retried.open();
+    expect(retried.send.mock.calls.map(([body]) => JSON.parse(body))).toEqual([
+        {
+            type: 'create_session',
+            nickname: 'Ola',
+            selectedHand: 'RIGHT',
+            confirmExistingNickname: true,
+        },
+    ]);
+    retried.message(state);
+    expect(client.gameState.value).toEqual(state);
+});
 it('times out and releases resources on disposal', () => {
     const { client, socket, scope } = setup();
     vi.advanceTimersByTime(100);

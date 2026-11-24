@@ -41,6 +41,11 @@ stop and remove the containers, use `docker compose down`. The named
 with the same Compose project name. `docker compose down -v` also deletes
 that volume and its saved scores.
 
+Before upgrading a database with recorded scores to one entry per nickname,
+take a consistent copy of `sllapp.db`. The first backend start migrates that
+file in place and preserves the highest score for each nickname. An older
+backend needs a database in its original format. [Storage and migration](backend-architecture.md#startup-and-configuration)
+
 To tune round timing, scoring or recognition, wait until the current round
 ends and edit `backend/src/main/resources/application.yml`. Compose mounts
 this file read-only at `/app/config/application.yml`. From the repository
@@ -96,7 +101,8 @@ Start the regular backend with diagnostic acknowledgements enabled.
 [Backend startup commands for macOS, Linux and Windows](#enable-websocket-acknowledgements)
 
 1. Open [the Vue game](http://127.0.0.1:5173), enter a nickname, select a hand
-   and click **Utwórz sesję**. Leave the camera off.
+   and click **Zaczynamy**. If the nickname is already in the ranking, select
+   **Kontynuuj**. Leave the camera off.
 2. In **Diagnostyka**, click **Wyślij testową dłoń** and then **Wyślij brak dłoni**.
 3. In **Historia WebSocket**, check that the browser sends `hand_sample` and
    `no_hand`. Each should have a matching `sample_ack` with the same `seq`.
