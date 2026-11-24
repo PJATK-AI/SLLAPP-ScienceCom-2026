@@ -142,7 +142,7 @@ const gameError = computed(() => {
                         <h2>Przeliteruj<br />słowo.</h2>
                         <p>
                             Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu
-                            palcowego.
+                            migowego.
                         </p>
                         <slot name="setup-extra" />
                     </div>
@@ -176,7 +176,7 @@ const gameError = computed(() => {
                                 </button>
                             </div>
                             <fieldset class="hands">
-                                <legend class="label">Dłoń do migania</legend>
+                                <legend class="label">Wybierz dłoń.</legend>
                                 <div class="segmented">
                                     <label>
                                         <input
