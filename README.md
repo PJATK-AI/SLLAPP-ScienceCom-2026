@@ -72,10 +72,13 @@ creates `apps/web/.env.local` if needed and prepares the camera assets.
 Use `pnpm dev` for subsequent starts.
 
 Open [the browser app](http://127.0.0.1:5173), enter a nickname and select a
-hand. Click **Utwórz sesję**, then **Uruchom kamerę**. To play, first [enable
-prediction on the regular backend](docs/local-development.md#enable-prediction-on-the-regular-backend).
+hand. Click **Zaczynamy**. If the nickname already has a ranking entry,
+choose **Kontynuuj** or **Zmień nick**. After the session opens, click
+**Uruchom kamerę**. To play, first [enable prediction on the regular
+backend](docs/local-development.md#enable-prediction-on-the-regular-backend).
 Click **Rozpocznij rundę**, then sign the highlighted letters using the hand
-reference beside the camera. The final score and ranking appear when the round ends.
+reference beside the camera. The end screen shows the current round's score
+and the ranking, which keeps only the best result for each nickname.
 
 ## Prediction service
 

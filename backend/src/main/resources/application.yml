@@ -1,9 +1,6 @@
 spring:
   application:
     name: sllapp
-  sql:
-    init:
-      mode: always
 
 sllapp:
   session:

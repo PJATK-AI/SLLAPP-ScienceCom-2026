@@ -1,5 +1,8 @@
 package pl.pjatk.ai.sllapp.moderation;
 
+import java.text.Normalizer;
+import java.util.Locale;
+
 import org.springframework.stereotype.Component;
 
 @Component
@@ -23,5 +26,11 @@ public class NicknamePolicy {
             throw new IllegalArgumentException("Nickname contains a blocked word.");
         }
         return trimmed;
+    }
+
+    public static String rankingKey(String nickname) {
+        var nfc = Normalizer.Form.NFC;
+        String normalized = Normalizer.normalize(nickname.strip(), nfc);
+        return Normalizer.normalize(normalized.toLowerCase(Locale.ROOT), nfc);
     }
 }

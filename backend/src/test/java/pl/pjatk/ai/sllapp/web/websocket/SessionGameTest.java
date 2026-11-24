@@ -114,6 +114,58 @@ class SessionGameTest {
     }
 
     @Test
+    void reusingNicknamePreservesTheBestScoreAcrossRoundFinishesAndResume() throws Exception {
+        var best = new GameResult("old-best", "Ola", 5, clock.instant());
+        results().save(best);
+        var connections = app.getBean(SessionConnectionRegistry.class);
+        var sessions = app.getBean(SessionService.class);
+        String confirmedCreate = """
+                {"type":"create_session","nickname":"ola","selectedHand":"RIGHT","confirmExistingNickname":true}
+                """;
+        try (var lower = socket(); var resumed = socket(); var higher = socket()) {
+            lower.send(confirmedCreate);
+            var lowerId = UUID.fromString(lower.next().path("sessionId").asString());
+            lower.send(START);
+            assertThat(lower.next().path("status").asString()).isEqualTo("RUNNING");
+            clock.advance(GAME_DURATION);
+            connections.expireSessions();
+            assertFinished(lower.next(), lowerId, 0);
+            assertThat(results().findTopResults(10)).containsExactly(best);
+            assertThat(sessions.find(lowerId).orElseThrow().hasPendingResult()).isFalse();
+            resume(resumed, lowerId.toString());
+            assertFinished(resumed.next(), lowerId, 0);
+
+            higher.send(confirmedCreate);
+            var higherId = UUID.fromString(higher.next().path("sessionId").asString());
+            higher.send(START);
+            assertThat(higher.next().path("status").asString()).isEqualTo("RUNNING");
+            assertThat(connections.completePosition(sessions.find(higherId).orElseThrow(), 1)).isTrue();
+            higher.next();
+            higher.socket.sendClose(1000, "done").get(5, TimeUnit.SECONDS);
+            assertThat(higher.closed.get(5, TimeUnit.SECONDS)).isEqualTo(1000);
+            clock.advance(GAME_DURATION);
+            connections.expireSessions();
+            assertThat(results().findTopResults(10)).containsExactly(
+                    new GameResult(higherId.toString(), "Ola", 10, clock.instant()));
+        }
+    }
+
+    @Test
+    void reportsStorageFailureAndAllowsRetryWithoutBindingASession() throws Exception {
+        var jdbc = app.getBean(JdbcTemplate.class);
+        try (var websocket = socket()) {
+            jdbc.execute("ALTER TABLE game_results RENAME TO unavailable_results");
+            try {
+                assertThat(create(websocket).path("code").asString()).isEqualTo("SESSION_STORAGE_UNAVAILABLE");
+                assertThat(app.getBean(SessionService.class).all()).isEmpty();
+            } finally {
+                jdbc.execute("ALTER TABLE unavailable_results RENAME TO game_results");
+            }
+            assertThat(create(websocket).path("status").asString()).isEqualTo("CREATED");
+        }
+    }
+
+    @Test
     void resumeAtTheDeadlinePublishesTheFinishToThePreviousOwnerOnlyOnce() throws Exception {
         try (var previous = socket(); var replacement = socket()) {
             var id = startGame(previous);

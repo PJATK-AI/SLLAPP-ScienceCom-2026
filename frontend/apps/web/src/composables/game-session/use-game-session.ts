@@ -9,6 +9,13 @@ import type {
     SessionError,
 } from '@/models/game-session';
 
+type CreateSessionCommand = {
+    type: 'create_session';
+    nickname: string;
+    selectedHand: SelectedHand;
+    confirmExistingNickname?: true;
+};
+
 export function useGameSession(
     options: { url?: string; timeoutMs?: number; diagnostics?: boolean } = {},
 ) {
@@ -16,6 +23,7 @@ export function useGameSession(
     const pendingAction = ref<'create' | 'resume' | 'start' | null>(null);
     const isReady = ref(false);
     const gameState = shallowRef<GameState | null>(null);
+    const nicknameConfirmation = shallowRef<CreateSessionCommand | null>(null);
     const error = shallowRef<SessionError | null>(null);
     const lastClose = shallowRef<{ code: number; reason: string; wasClean: boolean } | null>(null);
     const lastSentSeq = ref<number | null>(null);
@@ -62,6 +70,7 @@ export function useGameSession(
         cleanup();
         cleanup = () => {};
         clearTimer();
+        nicknameConfirmation.value = null;
         isReady.value = false;
         pendingAction.value = null;
         connectionStatus.value = 'closed';
@@ -81,9 +90,7 @@ export function useGameSession(
         );
     }
     function connect(
-        command:
-            | { type: 'create_session'; nickname: string; selectedHand: SelectedHand }
-            | { type: 'resume_session'; sessionId: string },
+        command: CreateSessionCommand | { type: 'resume_session'; sessionId: string },
     ) {
         if (disposed || pendingAction.value || isReady.value) return;
         disconnect();
@@ -147,6 +154,17 @@ export function useGameSession(
                 }
                 if (value.type === 'error') {
                     const action = pendingAction.value;
+                    if (
+                        action === 'create' &&
+                        command.type === 'create_session' &&
+                        !command.confirmExistingNickname &&
+                        value.code === 'NICKNAME_EXISTS'
+                    ) {
+                        record('connection', value.message, value.code);
+                        disconnect();
+                        nicknameConfirmation.value = command;
+                        return;
+                    }
                     const needsResume =
                         value.code === 'GAME_ALREADY_STARTED' || value.code === 'SESSION_REQUIRED';
                     fail(
@@ -235,12 +253,19 @@ export function useGameSession(
         startTimer();
     }
     function createSession(input: { nickname: string; selectedHand: SelectedHand }) {
-        if (!gameState.value)
+        if (!gameState.value && !nicknameConfirmation.value)
             connect({
                 type: 'create_session',
                 nickname: input.nickname,
                 selectedHand: input.selectedHand,
             });
+    }
+    function confirmNicknameReuse() {
+        const command = nicknameConfirmation.value;
+        if (command) connect({ ...command, confirmExistingNickname: true });
+    }
+    function dismissNicknameConfirmation() {
+        nicknameConfirmation.value = null;
     }
     function reconnect() {
         if (gameState.value && gameState.value.status !== 'FINISHED')
@@ -319,6 +344,7 @@ export function useGameSession(
         pendingAction: readonly(pendingAction),
         isReady: readonly(isReady),
         gameState: readonly(gameState),
+        nicknameConfirmation: readonly(nicknameConfirmation),
         error: readonly(error),
         lastClose: readonly(lastClose),
         lastSentSeq: readonly(lastSentSeq),
@@ -327,6 +353,8 @@ export function useGameSession(
         lastPrediction: readonly(lastPrediction),
         diagnosticEvents: readonly(diagnosticEvents),
         createSession,
+        confirmNicknameReuse,
+        dismissNicknameConfirmation,
         startGame,
         reconnect,
         disconnect,

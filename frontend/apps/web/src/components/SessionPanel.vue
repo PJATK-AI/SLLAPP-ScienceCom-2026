@@ -14,20 +14,38 @@ const diagnosticMode = import.meta.env.DEV && import.meta.env.MODE === 'diagnost
 const cameraActive = ref(false);
 const nickname = ref('');
 const selectedHand = ref<SelectedHand>('RIGHT');
+const nicknameInput = ref<HTMLInputElement | null>(null);
+const continueButton = ref<HTMLButtonElement | null>(null);
 const session = useGameSession({ diagnostics: diagnosticMode });
 const {
     pendingAction,
     isReady,
     gameState,
+    nicknameConfirmation,
     error,
     lastClose,
     createSession,
+    confirmNicknameReuse,
+    dismissNicknameConfirmation,
     startGame,
     reconnect,
     resetSession,
     sendHandSample,
     sendNoHand,
 } = session;
+
+watch([nickname, selectedHand], dismissNicknameConfirmation, { flush: 'sync' });
+watch(
+    nicknameConfirmation,
+    (confirmation) => {
+        if (confirmation) continueButton.value?.focus();
+    },
+    { flush: 'post' },
+);
+function changeNickname() {
+    dismissNicknameConfirmation();
+    nicknameInput.value?.focus();
+}
 
 const running = computed(() => (gameState.value?.status === 'RUNNING' ? gameState.value : null));
 const remainingSeconds = ref(0);
@@ -86,6 +104,8 @@ const gameError = computed(() => {
     if (connectionLost.value || gameState.value?.status === 'FINISHED') return '';
     if (lastClose.value?.code === 1008) return 'Sesja wygasła. Utwórz nową sesję.';
     if (error.value?.code === 'INVALID_SESSION') return 'Sprawdź nick i spróbuj ponownie.';
+    if (error.value?.code === 'SESSION_STORAGE_UNAVAILABLE')
+        return 'Nie udało się sprawdzić nicku. Spróbuj ponownie.';
     if (error.value?.code === 'INVALID_SAMPLE' || error.value?.code === 'GAME_FINISHED') return '';
     return error.value ? 'Wystąpił problem z połączeniem. Spróbuj ponownie.' : '';
 });
@@ -154,6 +174,7 @@ const gameError = computed(() => {
                             <div class="nick-row">
                                 <input
                                     id="nickname"
+                                    ref="nicknameInput"
                                     v-model="nickname"
                                     required
                                     maxlength="20"
@@ -197,7 +218,22 @@ const gameError = computed(() => {
                                     </label>
                                 </div>
                             </fieldset>
-                            <button type="submit" class="primary start">
+                            <div v-if="nicknameConfirmation" class="notice nickname-confirmation">
+                                <p id="nickname-reuse-message" role="status">
+                                    Ten nick jest już w rankingu. Czy chcesz zagrać pod tym nickiem?
+                                </p>
+                                <button
+                                    ref="continueButton"
+                                    type="button"
+                                    class="primary"
+                                    aria-describedby="nickname-reuse-message"
+                                    @click="confirmNicknameReuse"
+                                >
+                                    Kontynuuj
+                                </button>
+                                <button type="button" @click="changeNickname">Zmień nick</button>
+                            </div>
+                            <button v-else type="submit" class="primary start">
                                 {{ pendingAction === 'create' ? 'Łączenie…' : 'Zaczynamy' }}
                             </button>
                         </fieldset>
@@ -583,6 +619,12 @@ h2 {
 }
 .notice.error {
     color: var(--error);
+}
+.nickname-confirmation {
+    margin: 0;
+}
+.nickname-confirmation p {
+    flex-basis: 100%;
 }
 
 /* Camera and round. */

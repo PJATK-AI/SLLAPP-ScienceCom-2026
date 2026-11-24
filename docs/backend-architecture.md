@@ -111,6 +111,9 @@ WebSocket clients.
 `model.GameSession` holds player metadata and the game lifecycle. `SessionService`
 keeps sessions in memory and validates player names through `NicknamePolicy`.
 `BlockedWordList` reads `sllapp.moderation.blocked-words-location` once at startup.
+Session creation checks the persisted ranking after validation and requires
+confirmation to reuse a nickname with a saved result. Each confirmed replay
+creates its own session. [Session creation contract](api.md#create-a-session)
 On start, the session creates a `GameEngine` with the configured `GameRules`
 and its own picker. The production picker factory shares the bundled
 `WordCatalog`.
@@ -157,7 +160,13 @@ sequenceDiagram
     participant Connections as SessionConnectionRegistry
     participant AI as AiPredictionClient
     Client->>WS: create_session (nickname, selectedHand)
-    WS->>Sessions: validate and store player session
+    WS->>Sessions: validate nickname and check its saved ranking entry
+    opt Saved nickname and confirmation required
+        Sessions-->>WS: nickname exists
+        WS-->>Client: error (NICKNAME_EXISTS)
+        Client->>WS: create_session (confirmExistingNickname=true)
+        WS->>Sessions: create confirmed session
+    end
     Sessions-->>WS: GameSession
     WS->>Connections: bind socket to session
     Connections-->>Client: game_state (CREATED, sessionId, positionId=null)
@@ -291,16 +300,20 @@ The local test panels use the test classpath.
 
 `SllappApplication` starts Spring Boot. `SqliteConfiguration` resolves the storage
 directory to an absolute path, creates the directory and configures a
-`SQLiteDataSource` for `sllapp.db`. Spring runs `schema.sql` on startup through
-`spring.sql.init.mode=always`. The schema uses `CREATE TABLE IF NOT EXISTS` and
-`CREATE INDEX IF NOT EXISTS`.
+`SQLiteDataSource` for `sllapp.db`. `SqliteSchema` initializes the database
+before that data source becomes available to the rest of the application.
+It reads `PRAGMA user_version` inside an immediate transaction. For an empty
+database it applies `schema.sql`. For an existing database at version 0 it
+rebuilds `game_results`, retaining the highest score per nickname. It resolves
+ties by earliest finish time and then by lowest session identifier. It records
+version 1 in the same transaction. A migration failure rolls back the schema
+and data changes.
 
 | Setting | Value in `application.yml` |
 | --- | --- |
 | `server.address` | `127.0.0.1` |
 | `server.port` | `8080` |
 | `sllapp.storage.directory` | `${DATA_DIR:./data}` |
-| `spring.sql.init.mode` | `always` |
 
 The default database path is `./data/sllapp.db`, relative to the backend process
 working directory. Set `DATA_DIR` to use another directory. Keeping the database
@@ -326,7 +339,8 @@ The repository maps it to `game_results`:
 | Column | SQLite type | Constraint |
 | --- | --- | --- |
 | `session_id` | `TEXT` | Primary key, required |
-| `nickname` | `TEXT` | Required |
+| `nickname` | `TEXT` | Display nickname, required |
+| `nickname_key` | `TEXT` | Normalized nickname, required and unique |
 | `score` | `INTEGER` | Required, non-negative |
 | `finished_at` | `TEXT` | Required |
 
@@ -344,9 +358,13 @@ flowchart LR
     DS --> DB[(sllapp.db)]
 ```
 
-`save(GameResult)` inserts a row and returns `true` when the insert succeeds.
-`ON CONFLICT (session_id) DO NOTHING` keeps the original row on a repeated session
-identifier; the method returns `false` for that duplicate.
+`findNickname` reads the display nickname by the normalized nickname key.
+`save(GameResult)` uses one SQLite statement to insert a new entry or update
+the existing one when the new score is higher. A repeated session identifier,
+a lower score or an equal score returns `false`. An insert or an improvement
+returns `true`. The display nickname stays with the entry across improvements.
+The session service treats either return value as a completed write and retries
+storage errors in the session sweep.
 
 `findTopResults(int limit)` returns a list of results in this order:
 
@@ -368,7 +386,7 @@ row limit as a bound SQL parameter. A limit below 1 causes
 | Letter recognition | Streaks, hand release, late results, prediction limits and replay of a recorded camera timeline |
 | Prediction client | HTTP contract, connection reuse, timeouts, executor saturation and graceful startup when the service is unavailable |
 | Test panels | Profile isolation, simulated game completion and diagnostics with successful, failed, malformed and unavailable AI responses |
-| Ranking and storage | Ordering and limits, error responses, duplicate inserts, persistence after restart and nanosecond precision |
+| Ranking and storage | Ordering and limits, errors, schema migration and rollback, nickname normalization, concurrent writes, retries and nanosecond precision |
 
 The engine tests control time and word selection. The integration tests start
 embedded servers on random ports and use temporary SQLite files.

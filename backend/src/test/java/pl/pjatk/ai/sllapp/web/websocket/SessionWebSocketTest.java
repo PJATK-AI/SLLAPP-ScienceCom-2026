@@ -6,6 +6,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocketHandshakeException;
 import java.nio.file.Path;
+import java.time.Instant;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,8 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import pl.pjatk.ai.sllapp.SllappApplication;
+import pl.pjatk.ai.sllapp.model.GameResult;
+import pl.pjatk.ai.sllapp.repository.GameResultRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -92,6 +95,40 @@ class SessionWebSocketTest {
             assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SESSION");
             socket.send("{\"type\":\"resume_session\",\"sessionId\":\"" + java.util.UUID.randomUUID() + "\"}");
             assertThat(socket.closed.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1008);
+        }
+    }
+
+    @Test
+    void requiresConfirmationEvenWhenTheNicknameIsOutsideTheDefaultRanking() throws Exception {
+        var results = app.getBean(GameResultRepository.class);
+        var time = Instant.parse("2026-11-15T12:00:00Z");
+        for (int i = 0; i < 10; i++) {
+            results.save(new GameResult("leader-" + i, "Leader " + i, 100, time));
+        }
+        var existing = new GameResult("existing", "Łucja", 0, time);
+        results.save(existing);
+        assertThat(results.findTopResults(10)).doesNotContain(existing);
+
+        try (var socket = new WebSocketTestClient(client, port, null)) {
+            String create = """
+                    {"type":"create_session","nickname":" łUCJA ","selectedHand":"LEFT"%s}
+                    """;
+            socket.send(create.formatted(""));
+            assertThat(socket.next().path("code").asString()).isEqualTo("NICKNAME_EXISTS");
+            socket.send(create.formatted(",\"confirmExistingNickname\":false"));
+            assertThat(socket.next().path("code").asString()).isEqualTo("NICKNAME_EXISTS");
+            for (String invalid : new String[]{"null", "\"true\""}) {
+                socket.send(create.formatted(",\"confirmExistingNickname\":" + invalid));
+                assertThat(socket.next().path("code").asString()).isEqualTo("INVALID_SESSION");
+            }
+            socket.send("{\"type\":\"start_game\"}");
+            assertThat(socket.next().path("code").asString()).isEqualTo("SESSION_REQUIRED");
+
+            socket.send(create.formatted(",\"confirmExistingNickname\":true"));
+            var state = socket.next();
+            assertThat(state.path("status").asString()).isEqualTo("CREATED");
+            assertThat(state.path("nickname").asString()).isEqualTo("Łucja");
+            assertThat(state.path("selectedHand").asString()).isEqualTo("LEFT");
         }
     }
 

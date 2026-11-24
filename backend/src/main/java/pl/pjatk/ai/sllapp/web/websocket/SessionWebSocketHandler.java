@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -30,6 +33,7 @@ import tools.jackson.databind.ObjectReader;
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SessionWebSocketHandler extends AbstractWebSocketHandler {
+    private static final Logger log = LoggerFactory.getLogger(SessionWebSocketHandler.class);
     private final ObjectReader reader;
     private final SessionWebSocketProperties properties;
     private final SessionService sessions;
@@ -155,12 +159,24 @@ public class SessionWebSocketHandler extends AbstractWebSocketHandler {
             error(connection.socket, "INVALID_SESSION", "Expected nickname and selectedHand strings.");
             return;
         }
+        var confirmation = input.path("confirmExistingNickname");
+        if (!confirmation.isMissingNode() && !confirmation.isBoolean()) {
+            error(connection.socket, "INVALID_SESSION", "confirmExistingNickname must be a boolean.");
+            return;
+        }
         GameSession game;
         try {
             game = sessions.create(input.path("nickname").asString(),
-                    SelectedHand.valueOf(input.path("selectedHand").asString()));
+                    SelectedHand.valueOf(input.path("selectedHand").asString()), confirmation.asBoolean(false));
+        } catch (SessionService.NicknameExistsException exception) {
+            error(connection.socket, "NICKNAME_EXISTS", "Confirm reuse of the nickname to create a session.");
+            return;
         } catch (IllegalArgumentException exception) {
             error(connection.socket, "INVALID_SESSION", "Nickname or selectedHand is invalid.");
+            return;
+        } catch (DataAccessException exception) {
+            log.warn("Could not check the nickname while creating a session.", exception);
+            error(connection.socket, "SESSION_STORAGE_UNAVAILABLE", "Could not check the nickname. Try again.");
             return;
         }
         connections.bind(connection, game);

@@ -45,8 +45,8 @@ The response to `create_session` contains a new UUID and the stored player data:
 ```
 
 The nickname is stripped of leading/trailing Java whitespace and must contain
-1–20 Unicode code points, without control or format characters. The server
-normalizes the nickname with NFKC and lowercases it with `Locale.ROOT`. It
+1–20 Unicode code points, without control or format characters. For moderation,
+the server normalizes the nickname with NFKC and lowercases it with `Locale.ROOT`. It
 compares complete words and runs of digits against the blocklist. A phrase
 matches consecutive tokens in order. Punctuation and whitespace separate
 tokens, so the entry `six seven` also matches `six-seven`, and `67` matches
@@ -63,6 +63,25 @@ of decimal digits. Blank lines and lines starting with `#` are ignored. A
 missing, unreadable, malformed or empty list prevents the backend from starting.
 
 `selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
+
+The server looks up the nickname across all saved results. For this lookup it
+strips leading and trailing Java whitespace, normalizes to Unicode NFC,
+lowercases with `Locale.ROOT`, and applies NFC again. `Ola`, `ola` and ` Ola `
+therefore share one ranking entry.
+
+If a result exists, the server returns `NICKNAME_EXISTS` and leaves the
+connection unbound. After the player confirms, send `create_session` again
+with `confirmExistingNickname: true` on the same connection or a new one.
+The new session uses the display nickname from the saved entry.
+
+```json
+{"type":"create_session","nickname":"ola","selectedHand":"RIGHT","confirmExistingNickname":true}
+```
+
+`confirmExistingNickname` is optional and must be a JSON boolean when sent.
+Omitting it or sending `false` requires confirmation for a saved nickname.
+A storage lookup failure returns `SESSION_STORAGE_UNAVAILABLE` and leaves
+the connection unbound so the request can be retried.
 
 ### Start a game
 
@@ -109,9 +128,12 @@ an available session receives an error and leaves the game deadline in place.
 
 ### Finish a game
 
-At the game deadline, scoring ends and the server saves one ranking result for
-the session, even if the player disconnected. The current connection receives
-the final state. A successful resume after the deadline returns the same score.
+At the game deadline, scoring ends and the server submits the round's score to
+the ranking, even if the player disconnected. The first result creates the
+nickname's entry. A higher score replaces the stored score, finish time and
+session identifier. A lower or equal score keeps the stored record. The current
+connection receives the final state with the score from this round. A successful
+resume after the deadline returns that same round score.
 
 ```json
 {
@@ -400,7 +422,9 @@ The response is `200 OK` with `Content-Type: application/json`:
 
 Results follow score descending, finish time ascending and session identifier
 ascending. `rank` is the position in that order, starting at 1, including ties.
-Each stored game contributes one entry; matching nicknames remain separate.
+Each nickname contributes one entry with its highest saved score. Its display
+nickname comes from the first saved entry or from the best record selected
+during migration of an existing database.
 The response contains at most `limit` entries. An empty database returns `[]`.
 
 ## Invalid limit

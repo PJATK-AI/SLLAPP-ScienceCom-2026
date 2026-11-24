@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS game_results (
     session_id TEXT NOT NULL PRIMARY KEY,
     nickname TEXT NOT NULL,
+    nickname_key TEXT NOT NULL UNIQUE,
     score INTEGER NOT NULL CHECK (score >= 0),
     finished_at TEXT NOT NULL
 );
