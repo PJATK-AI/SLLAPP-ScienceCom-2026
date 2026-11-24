@@ -45,21 +45,22 @@ The response to `create_session` contains a new UUID and the stored player data:
 ```
 
 The nickname is stripped of leading/trailing Java whitespace and must contain
-1–20 Unicode code points, without control or format characters. A nickname is
-rejected when one of its letter sequences matches a blocked word after NFKC
-normalization and lowercasing with `Locale.ROOT`. Digits and punctuation separate
-words; substrings within other words are accepted. This is a word filter, not
-full moderation.
+1–20 Unicode code points, without control or format characters. The server
+normalizes the nickname with NFKC and lowercases it with `Locale.ROOT`. It
+compares complete words and runs of digits against the blocklist. A phrase
+matches consecutive tokens in order. Punctuation and whitespace separate
+tokens, so the entry `six seven` also matches `six-seven`, and `67` matches
+`Ola67`. A longer number such as `167` forms its own token.
 
 The backend reads the blocked-word list once at startup from
 `sllapp.moderation.blocked-words-location`. The default file,
-`backend/src/main/resources/moderation/blocked-words.txt`, contains Polish and
-English words adapted from LDNOOBW under CC BY 4.0; `SOURCES.md` in the same
-directory gives the source and the changes. The file is UTF-8, with one word
-per line. Blank lines and lines that start with `#` are ignored. Each entry must
-contain only letters and combining marks. The backend does not start when the
-file is missing, unreadable, not valid UTF-8, has an invalid entry or has no
-words.
+`backend/src/main/resources/moderation/blocked-words.txt`, includes Polish and
+English words adapted from LDNOOBW under CC BY 4.0. `SOURCES.md` in the same
+directory gives the source and the changes. The UTF-8 file takes one entry per
+line. Each entry contains one or more words or numbers separated by
+whitespace. Words consist of letters and combining marks, and numbers consist
+of decimal digits. Blank lines and lines starting with `#` are ignored. A
+missing, unreadable, malformed or empty list prevents the backend from starting.
 
 `selectedHand` must be `LEFT` or `RIGHT`. Invalid data receives `INVALID_SESSION`.
 
@@ -96,7 +97,7 @@ letter, including across words. The server sends a fresh `RUNNING` state after
 each completion, when the hand is released and on resume.
 `remainingMs` is the remaining whole milliseconds at the time of that snapshot.
 The server uses the configured scoring values. The default rules award 50
-points for completing a three-letter word and 120 for a four-letter word.
+points for completing a three-letter word and 180 for a four-letter word.
 [Scoring formula](backend-architecture.md#standalone-game-engine)
 
 An unbound connection receives `SESSION_REQUIRED`. A second `start_game` on
@@ -347,12 +348,12 @@ with an error that identifies the property.
 | `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
 | `sllapp.game.scoring.letter-points` | `10` | Nonnegative base points for a correct letter before the multiplier. |
 | `sllapp.game.scoring.word-bonus` | `20` | Nonnegative base bonus for completing a word, scaled by the same multiplier. |
-| `sllapp.game.scoring.multiplier-step` | `1` | Nonnegative increase in the multiplier for each letter beyond three. |
+| `sllapp.game.scoring.multiplier-step` | `2` | Nonnegative increase in the multiplier for each letter beyond three. |
 | `sllapp.game.recognition.min-confidence` | `0.80` | Inclusive prediction confidence threshold. Must be finite and between 0 and 1. |
 | `sllapp.game.recognition.required-predictions` | `3` | Consecutive qualifying predictions required to complete a position. Must be positive. |
 | `sllapp.game.recognition.max-sample-gap` | `350ms` | Inclusive maximum gap between acceptance times of consecutive counted samples. Must be positive. |
 | `sllapp.game.recognition.release-no-hand-count` | `2` | Consecutive `no_hand` events required to unlock a repeated letter. Must be positive. |
-| `sllapp.game.recognition.min-hold-duration` | `400ms` | Inclusive minimum span of a qualifying series, measured between sample acceptance times. Must be nonnegative. `0ms` disables the hold time requirement. |
+| `sllapp.game.recognition.min-hold-duration` | `250ms` | Inclusive minimum span of a qualifying series, measured between sample acceptance times. Must be nonnegative. `0ms` disables the hold time requirement. |
 | `sllapp.ai.timeout` | `250ms` | HTTP timeout and exclusive time budget from sample acceptance to applying a prediction. Must be positive. |
 
 Use Spring Boot command-line properties or environment variables such as

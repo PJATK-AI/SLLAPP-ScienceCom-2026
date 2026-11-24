@@ -40,14 +40,14 @@ class GameplayConfigurationTest {
             assertThat(app.getBean(SessionProperties.class)).isEqualTo(new SessionProperties(
                     Duration.ofMinutes(5), Duration.ofSeconds(60), Duration.ofMinutes(5)));
             assertThat(app.getBean(RecognitionProperties.class)).isEqualTo(new RecognitionProperties(
-                    0.80, 3, Duration.ofMillis(350), 2, Duration.ofMillis(400)));
+                    0.80, 3, Duration.ofMillis(350), 2, Duration.ofMillis(250)));
 
             var sessions = app.getBean(SessionService.class);
             var session = sessions.create("Ola", SelectedHand.RIGHT);
             synchronized (session) {
                 assertThat(sessions.start(session, clock.instant())).isTrue();
                 assertThat(session.state(clock.instant()).remainingMs()).isEqualTo(60_000);
-                assertWordAwards(session, clock, 50, 120);
+                assertWordAwards(session, clock, 50, 180);
             }
         });
     }

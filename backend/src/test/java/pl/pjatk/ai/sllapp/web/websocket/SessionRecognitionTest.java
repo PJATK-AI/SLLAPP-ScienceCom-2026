@@ -53,7 +53,8 @@ class SessionRecognitionTest {
     private static final Prediction A = new Prediction('A', 0.80);
     private static final Duration MAX_SAMPLE_GAP = Duration.ofMillis(350);
     private static final Duration MIN_HOLD = Duration.ofMillis(400);
-    private static final RecognitionProperties DEFAULTS = new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, MIN_HOLD);
+    private static final RecognitionProperties RULES_WITH_400_MS_HOLD =
+            new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, MIN_HOLD);
     private final ObjectMapper mapper = new ObjectMapper();
     private final MutableClock clock = new MutableClock();
     private final AtomicLong sampleNanos = new AtomicLong();
@@ -71,7 +72,7 @@ class SessionRecognitionTest {
     private SelectedHand selectedHand;
 
     @ParameterizedTest
-    @ValueSource(longs = {400, 600})
+    @ValueSource(longs = {250, 400, 600})
     void advancesExactlyOnceAtTheHoldThreshold(long holdMs) throws Exception {
         var socket = start(new RecognitionProperties(0.80, 3, MAX_SAMPLE_GAP, 2, Duration.ofMillis(holdMs)));
         predict(socket, A);
@@ -79,7 +80,8 @@ class SessionRecognitionTest {
         predictAAfter(socket, 100);
         assertState(socket, 1, 0, false);
         if (holdMs == 600) predictAAfter(socket, 200);
-        predictAAfter(socket, 199);
+        long elapsedMs = Duration.ofNanos(sampleNanos.get()).toMillis();
+        predictAAfter(socket, holdMs - elapsedMs - 1);
         assertState(socket, 1, 0, false);
         assertThat(socket.states()).hasSize(2);
         predictAAfter(socket, 1);
@@ -113,7 +115,7 @@ class SessionRecognitionTest {
 
     @Test
     void measuresHoldFromSampleAcceptanceInsteadOfPredictionCompletion() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predictAAfter(socket, 200);
         advance(199);
@@ -127,7 +129,7 @@ class SessionRecognitionTest {
 
     @Test
     void completesAtTheConfidenceAndSampleGapBoundaries() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         advance(350);
         socket.hand(1);
@@ -145,7 +147,7 @@ class SessionRecognitionTest {
     @ParameterizedTest
     @EnumSource(Interruption.class)
     void restartsTheStreakAfterAnInterruption(Interruption interruption) throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predictAAfter(socket, 100);
         predictAAfter(socket, 100);
@@ -176,7 +178,7 @@ class SessionRecognitionTest {
 
     @Test
     void startsANewStreakWithTheFirstGoodPredictionAfterAGap() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predictAAfter(socket, 200);
         predictAAfter(socket, 351);
@@ -205,7 +207,7 @@ class SessionRecognitionTest {
 
     @Test
     void replaysCameraEventsWithMissingHandsAndASampleGap() throws Exception {
-        var socket = start(DEFAULTS, SelectedHand.RIGHT);
+        var socket = start(RULES_WITH_400_MS_HOLD, SelectedHand.RIGHT);
         try (var input = getClass().getResourceAsStream("/recognition/camera-trace.csv")) {
             var rows = new String(input.readAllBytes(), StandardCharsets.UTF_8).lines()
                     .filter(line -> !line.startsWith("#")).skip(1).toList();
@@ -239,7 +241,7 @@ class SessionRecognitionTest {
     @ParameterizedTest
     @EnumSource(value = Interruption.class, names = {"NO_HAND", "OTHER_HAND"})
     void absenceInvalidatesThePendingResultWithoutOpeningAnotherSlot(Interruption interruption) throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predict(socket, A);
         socket.hand(1);
@@ -276,7 +278,7 @@ class SessionRecognitionTest {
 
     @Test
     void publishesAndPersistsTheFinalScoreWhenPredictionArrivesAtTheDeadline() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predictAAfter(socket, 200);
         advance(200);
@@ -336,7 +338,7 @@ class SessionRecognitionTest {
 
     @Test
     void startsAFreshSeriesAfterResumeAndAfterReleasingARepeatedLetter() throws Exception {
-        var first = start(DEFAULTS);
+        var first = start(RULES_WITH_400_MS_HOLD);
         predict(first, A);
         predictAAfter(first, 200);
         advance(200);
@@ -362,7 +364,7 @@ class SessionRecognitionTest {
 
     @Test
     void recoversFromAnImmediateFailureAndASubmissionException() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predict(socket, A);
         doReturn(CompletableFuture.completedStage(new Failure(FailureKind.DISABLED, null, null)))
@@ -379,7 +381,7 @@ class SessionRecognitionTest {
 
     @Test
     void recoversAfterAnAcknowledgementSendFails() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         doThrow(new IOException("ack failed")).when(socket.socket).sendMessage(any());
         assertThatThrownBy(() -> socket.hand(1)).isInstanceOf(IOException.class);
         assertThat(calls).isEmpty();
@@ -390,7 +392,7 @@ class SessionRecognitionTest {
 
     @Test
     void ignoresInvalidPositionsAndDuplicateSequencesBeforeRecognition() throws Exception {
-        var socket = start(DEFAULTS);
+        var socket = start(RULES_WITH_400_MS_HOLD);
         predict(socket, A);
         predictAAfter(socket, 200);
         socket.send(SampleFixtures.noHand(30).replace("null", "2"));
@@ -402,7 +404,7 @@ class SessionRecognitionTest {
 
     @Test
     void reportsTheRealPredictionAndFailureForTheOptedInRound() throws Exception {
-        var socket = start(DEFAULTS, SelectedHand.RIGHT, true, true);
+        var socket = start(RULES_WITH_400_MS_HOLD, SelectedHand.RIGHT, true, true);
         socket.hand(1);
         advance(21);
         lastCall().complete(A);
@@ -431,7 +433,7 @@ class SessionRecognitionTest {
 
     @Test
     void sendsNoPredictionReportToTheReplacedSocketOrItsSuccessor() throws Exception {
-        var first = start(DEFAULTS, SelectedHand.RIGHT, true, true);
+        var first = start(RULES_WITH_400_MS_HOLD, SelectedHand.RIGHT, true, true);
         first.hand(1);
         var replacement = resume(true);
         lastCall().complete(A);
@@ -444,7 +446,7 @@ class SessionRecognitionTest {
 
     @Test
     void requiresBothBackendDiagnosticsAndConnectionOptInForPredictionReports() throws Exception {
-        var socket = start(DEFAULTS, SelectedHand.RIGHT, false, true);
+        var socket = start(RULES_WITH_400_MS_HOLD, SelectedHand.RIGHT, false, true);
         predict(socket, A);
         assertThat(socket.messages).hasSize(2);
     }
