@@ -146,6 +146,7 @@ tests cover the Vue game, WebSocket sessions, ranking and hand tracking.
 
 | Document | Contents |
 | --- | --- |
+| [Presentation quick start](docs/presentation-quick-start.md) | Docker Compose commands for the presentation crew |
 | [Local development](docs/local-development.md) | Startup commands, ports, profiles and troubleshooting |
 | [API reference](docs/api.md) | WebSocket protocol and ranking endpoint |
 | [Frontend](docs/frontend.md) | Camera tracking, sample handling and workspace structure |
