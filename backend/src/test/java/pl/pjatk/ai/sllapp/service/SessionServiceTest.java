@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 import pl.pjatk.ai.sllapp.config.moderation.ModerationProperties;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
+import pl.pjatk.ai.sllapp.game.GameRules;
 import pl.pjatk.ai.sllapp.model.SelectedHand;
 import pl.pjatk.ai.sllapp.moderation.BlockedWordList;
 import pl.pjatk.ai.sllapp.moderation.NicknamePolicy;
@@ -71,7 +72,7 @@ class SessionServiceTest {
     }
 
     private SessionService sessions(Clock clock) {
-        return new SessionService(clock, properties, nicknames,
+        return new SessionService(clock, properties, GameRules.defaults(), nicknames,
                 () -> length -> "A".repeat(length), mock(GameResultRepository.class));
     }
 }

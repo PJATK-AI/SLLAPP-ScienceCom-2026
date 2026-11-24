@@ -95,7 +95,9 @@ The server starts one game and returns its current position.
 letter, including across words. The server sends a fresh `RUNNING` state after
 each completion, when the hand is released and on resume.
 `remainingMs` is the remaining whole milliseconds at the time of that snapshot.
-The server uses the default [game rules](backend-architecture.md#standalone-game-engine).
+The server uses the configured scoring values. The default rules award 50
+points for completing a three-letter word and 120 for a four-letter word.
+[Scoring formula](backend-architecture.md#standalone-game-engine)
 
 An unbound connection receives `SESSION_REQUIRED`. A second `start_game` on
 an available session receives an error and leaves the game deadline in place.
@@ -252,21 +254,28 @@ it. The slot stays occupied until the call ends, even if the socket is replaced.
 
 A result can count while the round, socket and position are current and the
 time since the server accepted the sample is below `sllapp.ai.timeout`. The
-prediction must match the expected letter and reach the minimum confidence.
-A different letter, low confidence, a prediction failure, an exceeded call
-budget, `no_hand` or a sample of the other hand resets the streak. If the time
-between two counted samples exceeds the maximum gap, the current qualifying
-sample starts a new streak. The server measures the gap between sample
-acceptance times. After the required streak, it awards points, advances the
-position and sends `game_state`.
+prediction must match the expected letter at or above `min-confidence`.
+The server awards points, advances the position and sends `game_state` once
+the same series reaches both `required-predictions` and `min-hold-duration`.
+The hold time runs from the first to the latest qualifying sample. The server
+measures it and the gaps between samples using monotonic sample acceptance
+times. If the count reaches its threshold first, each subsequent qualifying
+prediction in the series can satisfy the hold requirement. Set
+`min-hold-duration` to `0ms` to use the prediction count alone.
+
+A different letter, low confidence, a prediction failure or timeout,
+`no_hand`, a sample of the other hand, a position change or session resumption
+resets the count and hold time. A gap greater than `max-sample-gap` starts a
+new series with the current qualifying sample. A gap equal to the limit
+continues the existing series.
 
 While `requiresRelease` is true, consecutive `no_hand` messages for the active
 position count toward release. Send `no_hand` whenever the selected hand is
 absent, including when only the other hand is visible. Any hand sample resets
 the release count. At the configured count, the server sends `game_state` with
-`requiresRelease: false` and the same position and score. Subsequent samples
-can start a new prediction streak. On resume, the release flag is preserved
-and both the streak and the partial release count start at zero.
+`requiresRelease: false` and the same position and score. The first subsequent
+qualifying sample starts a new series. On resume, the release flag is preserved
+and any partial release count starts at zero.
 
 ### Round prediction diagnostics
 
@@ -322,6 +331,10 @@ open so the client can correct its request:
 
 ### WebSocket configuration
 
+The session, scoring and recognition defaults come from
+`backend/src/main/resources/application.yml`. Invalid settings fail startup
+with an error that identifies the property.
+
 | Spring property | Default | Meaning |
 | --- | --- | --- |
 | `sllapp.session.creation-ttl` | `5m` | Time to start or resume after creation. Must be positive. |
@@ -332,10 +345,14 @@ open so the client can correct its request:
 | `sllapp.websocket.transport-max-message-bytes` | `262144` | Hard limit; must exceed the positive application limit |
 | `sllapp.websocket.diagnostic-mode` | `false` | Send `sample_ack` for accepted samples and allow opted-in round prediction reports |
 | `sllapp.web.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin REST and WebSocket callers |
-| `sllapp.game.recognition.min-confidence` | `0.80` | Inclusive prediction confidence threshold, from 0 to 1 |
+| `sllapp.game.scoring.letter-points` | `10` | Nonnegative base points for a correct letter before the multiplier. |
+| `sllapp.game.scoring.word-bonus` | `20` | Nonnegative base bonus for completing a word, scaled by the same multiplier. |
+| `sllapp.game.scoring.multiplier-step` | `1` | Nonnegative increase in the multiplier for each letter beyond three. |
+| `sllapp.game.recognition.min-confidence` | `0.80` | Inclusive prediction confidence threshold. Must be finite and between 0 and 1. |
 | `sllapp.game.recognition.required-predictions` | `3` | Consecutive qualifying predictions required to complete a position. Must be positive. |
 | `sllapp.game.recognition.max-sample-gap` | `350ms` | Inclusive maximum gap between acceptance times of consecutive counted samples. Must be positive. |
 | `sllapp.game.recognition.release-no-hand-count` | `2` | Consecutive `no_hand` events required to unlock a repeated letter. Must be positive. |
+| `sllapp.game.recognition.min-hold-duration` | `400ms` | Inclusive minimum span of a qualifying series, measured between sample acceptance times. Must be nonnegative. `0ms` disables the hold time requirement. |
 | `sllapp.ai.timeout` | `250ms` | HTTP timeout and exclusive time budget from sample acceptance to applying a prediction. Must be positive. |
 
 Use Spring Boot command-line properties or environment variables such as

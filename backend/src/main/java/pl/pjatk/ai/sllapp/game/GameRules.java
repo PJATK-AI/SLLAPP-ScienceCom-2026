@@ -6,7 +6,9 @@ import java.util.Objects;
 import static pl.pjatk.ai.sllapp.game.WordCatalog.MIN_WORD_LENGTH;
 
 public record GameRules(int maxWordLength, BigDecimal letterPoints, BigDecimal wordBonus, BigDecimal multiplierStep) {
-    private static final GameRules DEFAULTS = new GameRules(7, BigDecimal.TEN, BigDecimal.valueOf(20), BigDecimal.ONE);
+    public static final int DEFAULT_MAX_WORD_LENGTH = 7;
+    private static final GameRules DEFAULTS = new GameRules(DEFAULT_MAX_WORD_LENGTH, BigDecimal.TEN,
+            BigDecimal.valueOf(20), BigDecimal.ONE);
 
     public GameRules {
         WordCatalog.requireValidMaximum(maxWordLength);

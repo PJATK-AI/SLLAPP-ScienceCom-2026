@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
+import pl.pjatk.ai.sllapp.game.GameRules;
 import pl.pjatk.ai.sllapp.game.WordPicker;
 import pl.pjatk.ai.sllapp.model.GameSession;
 import pl.pjatk.ai.sllapp.model.SelectedHand;
@@ -25,15 +26,17 @@ public class SessionService {
     private final ConcurrentHashMap<UUID, GameSession> sessions = new ConcurrentHashMap<>();
     private final Clock clock;
     private final SessionProperties properties;
+    private final GameRules gameRules;
     private final NicknamePolicy nicknames;
     private final Supplier<WordPicker> wordPickers;
     private final GameResultRepository results;
 
-    public SessionService(Clock clock, SessionProperties properties, NicknamePolicy nicknames,
+    public SessionService(Clock clock, SessionProperties properties, GameRules gameRules, NicknamePolicy nicknames,
                           @Qualifier("sessionWordPickerFactory") Supplier<WordPicker> wordPickers,
                           GameResultRepository results) {
         this.clock = clock;
         this.properties = properties;
+        this.gameRules = gameRules;
         this.nicknames = nicknames;
         this.wordPickers = wordPickers;
         this.results = results;
@@ -65,7 +68,8 @@ public class SessionService {
     }
 
     public boolean start(GameSession session, Instant now) {
-        return isActive(session, now) && session.start(now, properties.gameDuration(), properties.finishedTtl(), wordPickers);
+        return isActive(session, now) && session.start(now, properties.gameDuration(), properties.finishedTtl(),
+                gameRules, wordPickers);
     }
 
     public List<GameSession> all() {

@@ -9,6 +9,7 @@ public final class LetterRecognition {
     private boolean requiresRelease;
     private int consecutiveNoHand;
     private int streak;
+    private long firstCountedSampleNanos;
     private long lastCountedSampleNanos;
     private Attempt inFlight;
     private boolean attemptValid;
@@ -23,14 +24,14 @@ public final class LetterRecognition {
     }
 
     public void resetInput() {
-        streak = 0;
+        resetStreak();
         consecutiveNoHand = 0;
         // Invalidating a result keeps its slot occupied until the call ends.
         attemptValid = false;
     }
 
     public boolean noHand(int releaseNoHandCount) {
-        streak = 0;
+        resetStreak();
         attemptValid = false;
         if (!requiresRelease || ++consecutiveNoHand < releaseNoHandCount) return false;
         requiresRelease = false;
@@ -58,15 +59,24 @@ public final class LetterRecognition {
                                    RecognitionProperties rules) {
         if (!(result instanceof PredictionResult.Prediction prediction) || prediction.letter() != expectedLetter
                 || !Double.isFinite(prediction.confidence()) || prediction.confidence() < rules.minConfidence()) {
-            streak = 0;
+            resetStreak();
             return false;
         }
         long sampleNanos = attempt.sampleNanos();
         if (streak > 0 && Duration.ofNanos(sampleNanos - lastCountedSampleNanos).compareTo(rules.maxSampleGap()) > 0) {
-            streak = 0;
+            resetStreak();
         }
+        if (streak == 0) firstCountedSampleNanos = sampleNanos;
         lastCountedSampleNanos = sampleNanos;
-        return ++streak >= rules.requiredPredictions();
+        if (streak < rules.requiredPredictions()) streak++;
+        return streak >= rules.requiredPredictions()
+                && Duration.ofNanos(sampleNanos - firstCountedSampleNanos).compareTo(rules.minHoldDuration()) >= 0;
+    }
+
+    private void resetStreak() {
+        streak = 0;
+        firstCountedSampleNanos = 0;
+        lastCountedSampleNanos = 0;
     }
 
     public record Attempt(long sampleNanos) {}

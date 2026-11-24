@@ -11,8 +11,8 @@ elapsedMs,event,expectedPosition,expectedRequiresRelease
 300,hand_sample,1,false
 700,hand_sample,1,false
 800,hand_sample,1,false
-900,hand_sample,2,true
-1000,hand_sample,2,true
+900,hand_sample,1,false
+1000,hand_sample,1,false
 1100,hand_sample,2,true
 1200,hand_sample,2,true
 1300,hand_sample,2,true

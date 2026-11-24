@@ -21,6 +21,7 @@ import pl.pjatk.ai.sllapp.config.moderation.ModerationProperties;
 import pl.pjatk.ai.sllapp.config.session.RecognitionProperties;
 import pl.pjatk.ai.sllapp.config.session.SessionProperties;
 import pl.pjatk.ai.sllapp.config.web.SessionWebSocketProperties;
+import pl.pjatk.ai.sllapp.game.GameRules;
 import pl.pjatk.ai.sllapp.model.GameResult;
 import pl.pjatk.ai.sllapp.moderation.BlockedWordList;
 import pl.pjatk.ai.sllapp.moderation.NicknamePolicy;
@@ -45,11 +46,13 @@ class SessionOwnershipTest {
     private final GameResultRepository results = mock(GameResultRepository.class);
     private final SessionService sessions = new SessionService(clock,
             new SessionProperties(Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofMinutes(5)),
+            GameRules.defaults(),
             new NicknamePolicy(new BlockedWordList(
                     new ModerationProperties("classpath:moderation/test-blocked-words.txt"),
                     new DefaultResourceLoader())), () -> length -> "A".repeat(length), results);
     private final SessionConnectionRegistry connections = new SessionConnectionRegistry(sessions, mapper, clock,
-            mock(AiPredictionClient.class), new RecognitionProperties(0.8, 3, Duration.ofMillis(350), 2),
+            mock(AiPredictionClient.class), new RecognitionProperties(0.8, 3, Duration.ofMillis(350), 2,
+                    Duration.ofMillis(400)),
             Duration.ofMillis(250), System::nanoTime);
     private final SessionWebSocketHandler handler = new SessionWebSocketHandler(mapper,
             new SessionWebSocketProperties(65536, 262144, true), sessions, new SampleMessageValidator(),
