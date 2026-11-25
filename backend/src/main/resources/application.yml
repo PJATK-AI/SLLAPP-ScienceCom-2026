@@ -34,7 +34,7 @@ sllapp:
       release-no-hand-count: 2
       # Minimum time between acceptance of the first and latest qualifying samples.
       # Set to 0ms to disable the hold-time requirement.
-      min-hold-duration: 250ms
+      min-hold-duration: 300ms
   ai:
     enabled: ${AI_PREDICTION_ENABLED:false}
     base-url: ${AI_PREDICTION_BASE_URL:}
