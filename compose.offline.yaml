@@ -1,0 +1,74 @@
+name: sllapp-offline
+
+services:
+  frontend:
+    image: sllapp/frontend:${SLLAPP_IMAGE_TAG:?Missing offline image tag}
+    platform: "${SLLAPP_PLATFORM:?Missing offline platform}"
+    pull_policy: never
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8088:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: sllapp/backend:${SLLAPP_IMAGE_TAG:?Missing offline image tag}
+    platform: "${SLLAPP_PLATFORM:?Missing offline platform}"
+    pull_policy: never
+    environment:
+      SERVER_ADDRESS: "0.0.0.0"
+      DATA_DIR: /data
+      AI_PREDICTION_ENABLED: "true"
+      AI_PREDICTION_BASE_URL: http://model:8000
+      SPRING_APPLICATION_JSON: >-
+        {"sllapp":{"web":{"allowed-origins":["http://127.0.0.1:8088","http://localhost:8088"]}}}
+    volumes:
+      - ranking:/data
+      - type: bind
+        source: ./offline/application.yml
+        target: /app/config/application.yml
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      model:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/api/ranking?limit=1"]
+      interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 15
+
+  model:
+    image: sllapp/model:${SLLAPP_IMAGE_TAG:?Missing offline image tag}
+    platform: "${SLLAPP_PLATFORM:?Missing offline platform}"
+    pull_policy: never
+    environment:
+      SLLAPP_PREDICT_HOST: "0.0.0.0"
+      SLLAPP_MODEL_PATH: /app/model/artifacts/model.joblib
+    volumes:
+      - type: bind
+        source: ./model/artifacts/model.joblib
+        target: /app/model/artifacts/model.joblib
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2).close()"
+      interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 15
+
+volumes:
+  ranking:
