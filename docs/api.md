@@ -375,7 +375,7 @@ with an error that identifies the property.
 | `sllapp.game.recognition.required-predictions` | `3` | Consecutive qualifying predictions required to complete a position. Must be positive. |
 | `sllapp.game.recognition.max-sample-gap` | `350ms` | Inclusive maximum gap between acceptance times of consecutive counted samples. Must be positive. |
 | `sllapp.game.recognition.release-no-hand-count` | `2` | Consecutive `no_hand` events required to unlock a repeated letter. Must be positive. |
-| `sllapp.game.recognition.min-hold-duration` | `250ms` | Inclusive minimum span of a qualifying series, measured between sample acceptance times. Must be nonnegative. `0ms` disables the hold time requirement. |
+| `sllapp.game.recognition.min-hold-duration` | `300ms` | Inclusive minimum span of a qualifying series, measured between sample acceptance times. Must be nonnegative. `0ms` disables the hold time requirement. |
 | `sllapp.ai.timeout` | `250ms` | HTTP timeout and exclusive time budget from sample acceptance to applying a prediction. Must be positive. |
 
 Use Spring Boot command-line properties or environment variables such as
