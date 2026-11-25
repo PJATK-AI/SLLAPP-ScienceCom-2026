@@ -24,6 +24,13 @@
 
 ## Quick start
 
+### Play offline on Windows
+
+Download the prepared offline ZIP for your computer from GitHub Releases.
+Extract it and follow its `README.md`. The bundle includes the Docker images,
+editable gameplay settings, and batch files for the presentation crew.
+[Offline quick start](docs/offline-quick-start.md) · [Build and publish the bundle](docs/offline-release.md)
+
 ### Play with Docker Compose
 
 With Docker running, run this from the repository root:
