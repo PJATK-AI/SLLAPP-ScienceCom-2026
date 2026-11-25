@@ -31,12 +31,23 @@ function detection(hands: { name: 'Left' | 'Right'; score: number }[]) {
 }
 
 let landmarker: { detectForVideo: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> };
-let track: { stop: ReturnType<typeof vi.fn> };
+let track: ReturnType<typeof fakeVideoTrack>;
 let stream: MediaStream;
 let getUserMedia: ReturnType<typeof vi.fn>;
 let frames: Map<number, FrameRequestCallback>;
 let video: HTMLVideoElement;
 let videoTime: number;
+
+function fakeVideoTrack() {
+    return Object.assign(new EventTarget(), { stop: vi.fn(), readyState: 'live' });
+}
+
+function streamFor(videoTrack: typeof track): MediaStream {
+    return {
+        getTracks: () => [videoTrack],
+        getVideoTracks: () => [videoTrack],
+    } as unknown as MediaStream;
+}
 
 function runFrame(): void {
     const [id, callback] = [...frames][0] ?? [];
@@ -53,8 +64,8 @@ beforeEach(() => {
     mediapipe.forVisionTasks.mockResolvedValue({});
     mediapipe.createFromOptions.mockResolvedValue(landmarker);
 
-    track = { stop: vi.fn() };
-    stream = { getTracks: () => [track] } as unknown as MediaStream;
+    track = fakeVideoTrack();
+    stream = streamFor(track);
     getUserMedia = vi.fn().mockResolvedValue(stream);
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
 
@@ -310,6 +321,42 @@ describe('createHandTracker', () => {
         expect(video.srcObject).toBeNull();
         expect(frames.size).toBe(0);
         expect(tracker.isRunning).toBe(false);
+    });
+
+    it('reports a lost camera and ignores ended events from the previous stream after retry', async () => {
+        const tracker = createHandTracker(options);
+        const onError = vi.fn();
+        tracker.onError(onError);
+        await tracker.start(video);
+        runFrame();
+
+        track.dispatchEvent(new Event('ended'));
+        expect(onError).toHaveBeenCalledWith(
+            expect.objectContaining({ code: 'camera-unavailable' }),
+        );
+        expect(track.stop).toHaveBeenCalledOnce();
+        expect(tracker.isRunning).toBe(false);
+        expect(video.srcObject).toBeNull();
+        expect(frames.size).toBe(0);
+
+        const nextStream = streamFor(fakeVideoTrack());
+        getUserMedia.mockResolvedValueOnce(nextStream);
+        await tracker.start(video);
+        track.dispatchEvent(new Event('ended'));
+        expect(onError).toHaveBeenCalledOnce();
+        expect(tracker.isRunning).toBe(true);
+        expect(video.srcObject).toBe(nextStream);
+        tracker.dispose();
+    });
+
+    it('reports a camera that ended before playback', async () => {
+        track.readyState = 'ended';
+        const tracker = createHandTracker(options);
+
+        await expect(tracker.start(video)).rejects.toMatchObject({ code: 'camera-unavailable' });
+        expect(track.stop).toHaveBeenCalledOnce();
+        expect(tracker.isRunning).toBe(false);
+        expect(frames.size).toBe(0);
     });
 
     it('releases the camera when stop is called during start', async () => {

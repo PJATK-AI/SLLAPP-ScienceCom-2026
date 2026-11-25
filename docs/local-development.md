@@ -129,7 +129,9 @@ $env:AI_PREDICTION_BASE_URL = 'http://127.0.0.1:8000'
 ```
 
 1. Open [the Vue game](http://127.0.0.1:5173) and create a session. Click
-   **Uruchom kamerę**, allow camera access and click **Rozpocznij rundę**.
+   **Uruchom kamerę**, allow camera access and wait for the tracker to process
+   the first frame. Click **Rozpocznij rundę** and wait for the **3–2–1**
+   countdown before signing.
 2. Sign the highlighted letter with the selected hand. In **Ostatnia predykcja
    AI**, check the predicted letter, confidence (**Ufność**), HTTP status and
    game decision (**Decyzja gry**).

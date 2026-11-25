@@ -22,6 +22,8 @@ export interface UseHandTrackerReturn {
     hand: Readonly<ShallowRef<Hand | null>>;
     /** True from the call to `start()` until the call to `stop()` or an error. */
     isRunning: Readonly<Ref<boolean>>;
+    /** True after the current camera run processes a frame, even if no hand is visible. */
+    hasProcessedFrame: Readonly<Ref<boolean>>;
     /** The latest error, or null. `start()` clears it. */
     error: Readonly<ShallowRef<HandTrackerError | null>>;
     /**
@@ -45,16 +47,19 @@ export function useHandTracker(
     const tracker = createHandTracker(options);
     const hand = shallowRef<Hand | null>(null);
     const isRunning = ref(false);
+    const hasProcessedFrame = ref(false);
     const error = shallowRef<HandTrackerError | null>(null);
 
     const unsubscribeResult = tracker.onResult((result, timestamp) => {
         if (!isRunning.value) return;
         hand.value = result;
+        hasProcessedFrame.value = true;
         onFrame?.(result, timestamp);
     });
     const unsubscribeError = tracker.onError((trackerError) => {
         error.value = trackerError;
         isRunning.value = false;
+        hasProcessedFrame.value = false;
         hand.value = null;
     });
 
@@ -80,6 +85,7 @@ export function useHandTracker(
     function stop(): void {
         tracker.stop();
         isRunning.value = false;
+        hasProcessedFrame.value = false;
         hand.value = null;
     }
 
@@ -99,6 +105,7 @@ export function useHandTracker(
             unsubscribeError();
             tracker.dispose();
             isRunning.value = false;
+            hasProcessedFrame.value = false;
             hand.value = null;
         });
     }
@@ -106,6 +113,7 @@ export function useHandTracker(
     return {
         hand: shallowReadonly(hand),
         isRunning: shallowReadonly(isRunning),
+        hasProcessedFrame: shallowReadonly(hasProcessedFrame),
         error: shallowReadonly(error),
         start,
         stop,

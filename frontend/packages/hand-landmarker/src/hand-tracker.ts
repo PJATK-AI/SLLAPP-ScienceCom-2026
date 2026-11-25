@@ -23,6 +23,7 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
     let landmarker: HandLandmarker | null = null;
     let startPromise: Promise<void> | null = null;
     let stream: MediaStream | null = null;
+    let videoTracks: MediaStreamTrack[] = [];
     let video: HTMLVideoElement | null = null;
     let frameId: number | null = null;
     let lastVideoTime = -1;
@@ -48,6 +49,11 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
         for (const callback of errorCallbacks) {
             callback(error);
         }
+    }
+
+    function onCameraEnded(): void {
+        stop();
+        reportError(new HandTrackerError('camera-unavailable', 'The camera stream ended.'));
     }
 
     function detectFrame(): void {
@@ -106,8 +112,16 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
                 : (cameraResult as PromiseRejectedResult).reason;
         }
 
+        const tracks = cameraResult.value.getVideoTracks();
+        if (tracks.some((track) => track.readyState === 'ended')) {
+            stopStream(cameraResult.value);
+            running = false;
+            throw new HandTrackerError('camera-unavailable', 'The camera ended before playback.');
+        }
         landmarker = landmarkerResult.value;
         stream = cameraResult.value;
+        videoTracks = tracks;
+        for (const track of videoTracks) track.addEventListener('ended', onCameraEnded);
         video = element;
         element.muted = true;
         element.playsInline = true;
@@ -164,6 +178,8 @@ export function createHandTracker(options: HandTrackerOptions): HandTracker {
             cancelAnimationFrame(frameId);
             frameId = null;
         }
+        for (const track of videoTracks) track.removeEventListener('ended', onCameraEnded);
+        videoTracks = [];
         if (stream !== null) {
             stopStream(stream);
             stream = null;

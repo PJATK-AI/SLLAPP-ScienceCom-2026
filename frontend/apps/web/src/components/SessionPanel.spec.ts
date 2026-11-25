@@ -22,13 +22,18 @@ function mockCamera() {
     let frame!: (hand: Hand | null, timestamp: number) => void;
     const running = ref(false);
     const hand = shallowRef<Hand | null>(null);
+    const hasProcessedFrame = ref(false);
     const stop = vi.fn(() => {
         running.value = false;
+        hasProcessedFrame.value = false;
+        hand.value = null;
     });
     camera.tracker.mockImplementation(
         (_video, _options: HandTrackerOptions, callback: typeof frame) => {
             frame = (result, timestamp) => {
+                if (!running.value) return;
                 hand.value = result;
+                hasProcessedFrame.value = true;
                 callback(result, timestamp);
             };
             onScopeDispose(stop);
@@ -38,6 +43,7 @@ function mockCamera() {
                 },
                 stop,
                 isRunning: running,
+                hasProcessedFrame,
                 hand,
                 error: shallowRef(null),
             } satisfies UseHandTrackerReturn;
@@ -269,6 +275,63 @@ it('shows exactly one reference crop for each supported letter', async () => {
     wrapper.unmount();
 });
 
+it.each(['typing', 'randomizing'])(
+    'shows an inline nickname error and allows retry after %s',
+    async (action) => {
+        vi.stubGlobal('WebSocket', Socket);
+        vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
+        mockCamera();
+        const wrapper = mountPanel(document.body);
+        try {
+            const nickname = wrapper.get('#nickname');
+            const input = nickname.element as HTMLInputElement;
+            const form = wrapper.get('form');
+            await nickname.setValue('67');
+            await form.trigger('submit');
+            const rejected = Socket.last;
+            openSocket(rejected);
+            rejected.message({
+                type: 'error',
+                code: 'INVALID_SESSION',
+                message: 'Invalid nickname',
+            });
+            await nextTick();
+
+            const alert = form.get('[role="alert"]');
+            expect(alert.text()).toBe(
+                'Ten nick jest niedozwolony. Wpisz inny lub kliknij „Losuj”.',
+            );
+            expect(input.value).toBe('67');
+            expect(nickname.attributes('aria-invalid')).toBe('true');
+            expect(nickname.attributes('aria-describedby')).toBe(alert.attributes('id'));
+            expect(document.activeElement).toBe(input);
+
+            if (action === 'typing') await nickname.setValue('Ola');
+            else await form.get('.dice').trigger('click');
+            const corrected = input.value;
+            expect(corrected).not.toBe('67');
+            expect(form.find('[role="alert"]').exists()).toBe(false);
+            expect(nickname.attributes('aria-invalid')).toBeUndefined();
+            expect(nickname.attributes('aria-describedby')).toBeUndefined();
+
+            await form.trigger('submit');
+            const retried = Socket.last;
+            expect(retried).not.toBe(rejected);
+            openSocket(retried);
+            expect(JSON.parse(retried.send.mock.calls[0]![0])).toMatchObject({
+                type: 'create_session',
+                nickname: corrected,
+            });
+            retried.message({ ...createdRound, nickname: corrected });
+            await nextTick();
+            expect(wrapper.find('form').exists()).toBe(false);
+            expect(wrapper.find('video').exists()).toBe(true);
+        } finally {
+            wrapper.unmount();
+        }
+    },
+);
+
 it('offers to reuse a nickname or focuses the field to enter a different one', async () => {
     vi.stubGlobal('WebSocket', Socket);
     vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
@@ -288,6 +351,7 @@ it('offers to reuse a nickname or focuses the field to enter a different one', a
         expect(wrapper.get('#nickname-reuse-message').text()).toBe(
             'Ten nick jest już w rankingu. Czy chcesz zagrać pod tym nickiem?',
         );
+        expect(nickname.attributes('aria-invalid')).toBeUndefined();
         expect(document.activeElement).toBe(button('Kontynuuj').element);
 
         await button('Zmień nick').trigger('click');
@@ -347,13 +411,58 @@ it('sends a confirmation from the form only for the nickname and hand that were 
     }
 });
 
-it('plays and resumes a round, then keeps the final score through a ranking failure', async () => {
+const createdRound = {
+    type: 'game_state',
+    sessionId: '12345678-1234-1234-1234-123456789abc',
+    status: 'CREATED',
+    nickname: 'Ola',
+    selectedHand: 'RIGHT',
+    positionId: null,
+};
+const runningRound = {
+    ...createdRound,
+    status: 'RUNNING',
+    positionId: 1,
+    word: 'LAS',
+    letterIndex: 0,
+    expectedLetter: 'L',
+    remainingMs: 10000,
+    score: 0,
+    requiresRelease: true,
+};
+
+function openSocket(socket: Socket) {
+    socket.readyState = Socket.OPEN;
+    socket.dispatchEvent(new Event('open'));
+}
+
+function startRequests(socket: Socket) {
+    return socket.send.mock.calls
+        .map(([json]) => JSON.parse(json))
+        .filter((msg) => msg.type === 'start_game');
+}
+
+async function mountCreatedRound() {
     vi.stubGlobal('WebSocket', Socket);
     vi.stubEnv('VITE_WS_URL', 'ws://localhost/ws');
-    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost/api');
     vi.useFakeTimers({
         toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance'],
     });
+    const tracker = mockCamera();
+    const wrapper = mountPanel();
+    const button = (text: string) =>
+        wrapper.findAll('button').find((item) => item.text() === text)!;
+    await wrapper.get('input').setValue(createdRound.nickname);
+    await wrapper.get('form').trigger('submit');
+    const socket = Socket.last;
+    openSocket(socket);
+    socket.message(createdRound);
+    await nextTick();
+    return { wrapper, button, tracker, socket };
+}
+
+it('plays and resumes a round, then keeps the final score through a ranking failure', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost/api');
     const fetchRanking = vi
         .fn()
         .mockRejectedValueOnce(new Error('offline'))
@@ -361,44 +470,38 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
             new Response(JSON.stringify([{ rank: 1, nickname: 'Ola', score: 100 }])),
         );
     vi.stubGlobal('fetch', fetchRanking);
-    const tracker = mockCamera();
-    const wrapper = mountPanel();
-    const button = (text: string) =>
-        wrapper.findAll('button').find((item) => item.text() === text)!;
-    await wrapper.get('input').setValue('Ola');
-    await wrapper.get('form').trigger('submit');
-    const socket = Socket.last;
-    socket.readyState = 1;
-    socket.dispatchEvent(new Event('open'));
-    const created = {
-        type: 'game_state',
-        sessionId: '12345678-1234-1234-1234-123456789abc',
-        status: 'CREATED',
-        nickname: 'Ola',
-        selectedHand: 'RIGHT',
-        positionId: null,
-    };
-    socket.message(created);
-    await nextTick();
+    const { wrapper, button, tracker, socket } = await mountCreatedRound();
+    const rules = wrapper.get('section[aria-labelledby="round-rules-title"]');
+    expect(rules.get('h3').text()).toBe('Zasady rundy');
+    expect(rules.findAll('li')).toHaveLength(3);
     expect(button('Rozpocznij rundę').attributes('disabled')).toBeDefined();
     await button('Uruchom kamerę').trigger('click');
-    expect(button('Rozpocznij rundę').attributes('disabled')).toBeUndefined();
-    await button('Rozpocznij rundę').trigger('click');
-    expect(JSON.parse(socket.send.mock.calls[1]![0])).toEqual({ type: 'start_game' });
+    expect(wrapper.text()).toContain('Uruchamianie kamery…');
+    const start = button('Rozpocznij rundę');
+    expect(start.attributes('disabled')).toBeDefined();
+    tracker.frame(null, 0);
+    await nextTick();
+    expect(start.attributes('disabled')).toBeUndefined();
+    await Promise.all([start.trigger('click'), start.trigger('click')]);
+
+    const countdown = () => wrapper.get('.ready-copy [role="status"]').text();
+    expect(start.attributes('disabled')).toBeDefined();
+    expect(countdown()).toBe('3');
+    expect(wrapper.find('.round-rules').exists()).toBe(false);
+    const firstNumber = wrapper.get('.countdown-number').element;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(countdown()).toBe('2');
+    expect(wrapper.get('.countdown-number').element).not.toBe(firstNumber);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(countdown()).toBe('1');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(startRequests(socket)).toHaveLength(0);
+    expect(wrapper.find('[role="timer"]').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(startRequests(socket)).toEqual([{ type: 'start_game' }]);
     expect(button('Rozpoczynanie…').attributes('disabled')).toBeDefined();
 
-    const running = {
-        ...created,
-        status: 'RUNNING',
-        positionId: 1,
-        word: 'LAS',
-        letterIndex: 0,
-        expectedLetter: 'L',
-        remainingMs: 10000,
-        score: 0,
-        requiresRelease: true,
-    };
-    socket.message(running);
+    socket.message(runningRound);
     await nextTick();
     expect(wrapper.get('[aria-current="step"]').text()).toBe('L');
     expect(wrapper.get('[role="img"]').attributes('aria-label')).toContain('litery L');
@@ -406,11 +509,11 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
     expect(wrapper.get('[role="timer"]').text()).toBe('00:10');
     await vi.advanceTimersByTimeAsync(2000);
     expect(wrapper.get('[role="timer"]').text()).toBe('00:08');
-    socket.message({ ...running, requiresRelease: false, remainingMs: 8100 });
+    socket.message({ ...runningRound, requiresRelease: false, remainingMs: 8100 });
     await nextTick();
     expect(wrapper.text()).not.toContain('Wyjmij dłoń z kadru');
     const nextPosition = {
-        ...running,
+        ...runningRound,
         positionId: 2,
         letterIndex: 1,
         expectedLetter: 'A',
@@ -430,9 +533,8 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
     await nextTick();
     await button('Wznów sesję').trigger('click');
     const resumed = Socket.last;
-    resumed.readyState = 1;
-    resumed.dispatchEvent(new Event('open'));
-    const final = { ...created, status: 'FINISHED', remainingMs: 0, score: 20 };
+    openSocket(resumed);
+    const final = { ...createdRound, status: 'FINISHED', remainingMs: 0, score: 20 };
     resumed.message(final);
     await flushPromises();
     expect(tracker.stop).toHaveBeenCalledOnce();
@@ -451,5 +553,124 @@ it('plays and resumes a round, then keeps the final score through a ranking fail
     await button('Nowa sesja').trigger('click');
     expect(wrapper.find('form').exists()).toBe(true);
     expect(resumed.close).toHaveBeenCalled();
+    wrapper.unmount();
+});
+
+it('cancels the countdown when the camera stops and requires a new frame before retry', async () => {
+    const { wrapper, button, tracker, socket } = await mountCreatedRound();
+    await button('Uruchom kamerę').trigger('click');
+    tracker.frame(null, 0);
+    await nextTick();
+    await button('Rozpocznij rundę').trigger('click');
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await button('Zatrzymaj kamerę').trigger('click');
+    expect(wrapper.get('.round-rules h3').text()).toBe('Zasady rundy');
+    await button('Uruchom kamerę').trigger('click');
+    expect(button('Rozpocznij rundę').attributes('disabled')).toBeDefined();
+    tracker.frame(null, 1000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(socket)).toHaveLength(0);
+
+    await button('Rozpocznij rundę').trigger('click');
+    expect(wrapper.get('.countdown-number').text()).toBe('3');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(socket)).toHaveLength(1);
+    wrapper.unmount();
+});
+
+it('cancels on disconnect and starts a fresh countdown after resuming a created session', async () => {
+    const { wrapper, button, tracker, socket } = await mountCreatedRound();
+    await button('Uruchom kamerę').trigger('click');
+    tracker.frame(null, 0);
+    await nextTick();
+    await button('Rozpocznij rundę').trigger('click');
+    await vi.advanceTimersByTimeAsync(1000);
+
+    socket.dispatchEvent(new CloseEvent('close', { code: 1006 }));
+    await nextTick();
+    await button('Wznów sesję').trigger('click');
+    const resumed = Socket.last;
+    openSocket(resumed);
+    resumed.message(createdRound);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(socket)).toHaveLength(0);
+    expect(startRequests(resumed)).toHaveLength(0);
+
+    await button('Rozpocznij rundę').trigger('click');
+    expect(wrapper.get('.countdown-number').text()).toBe('3');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(resumed)).toHaveLength(1);
+    wrapper.unmount();
+});
+
+it.each(['back', 'unmount'])('clears the countdown on %s', async (action) => {
+    const { wrapper, button, tracker, socket } = await mountCreatedRound();
+    await button('Uruchom kamerę').trigger('click');
+    tracker.frame(null, 0);
+    await nextTick();
+    await button('Rozpocznij rundę').trigger('click');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vi.getTimerCount()).toBe(1);
+
+    if (action === 'back') {
+        await button('Wróć').trigger('click');
+        expect(wrapper.find('form').exists()).toBe(true);
+        wrapper.unmount();
+    } else {
+        wrapper.unmount();
+    }
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(socket)).toHaveLength(0);
+});
+
+it('resumes a running round directly and explains the ranking when leaving it', async () => {
+    const { wrapper, button, tracker, socket } = await mountCreatedRound();
+    await button('Uruchom kamerę').trigger('click');
+    tracker.frame(null, 0);
+    await nextTick();
+    await button('Rozpocznij rundę').trigger('click');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(startRequests(socket)).toHaveLength(1);
+
+    socket.dispatchEvent(new CloseEvent('close', { code: 1006 }));
+    await nextTick();
+    await button('Wznów sesję').trigger('click');
+    const resumed = Socket.last;
+    openSocket(resumed);
+    resumed.message({ ...runningRound, remainingMs: 8000, score: 10 });
+    await nextTick();
+    expect(wrapper.get('[role="timer"]').text()).toBe('00:08');
+    expect(wrapper.find('.countdown-number').exists()).toBe(false);
+    expect(startRequests(resumed)).toHaveLength(0);
+
+    const dialog = wrapper.get('dialog.leave-dialog');
+    // jsdom supports the open attribute but does not put dialogs in the modal top layer.
+    Object.assign(dialog.element, {
+        showModal: () => dialog.element.setAttribute('open', ''),
+        close: () => dialog.element.removeAttribute('open'),
+    });
+    expect(dialog.attributes('open')).toBeUndefined();
+    expect(wrapper.find('.camera-area dialog').exists()).toBe(false);
+    await button('Opuść rundę').trigger('click');
+    expect(dialog.attributes('open')).toBeDefined();
+    expect(dialog.get('#leave-round-description').text()).toContain('Po upływie czasu rundy');
+    expect(dialog.get('#leave-round-description').text()).toContain('poprawia zapisany rekord');
+    expect(button('Graj dalej').attributes('autofocus')).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[role="timer"]').text()).toBe('00:07');
+    expect(tracker.stop).not.toHaveBeenCalled();
+    await button('Graj dalej').trigger('click');
+    expect(dialog.attributes('open')).toBeUndefined();
+    expect(resumed.close).not.toHaveBeenCalled();
+
+    await button('Opuść rundę').trigger('click');
+    await button('Tak, opuść rundę').trigger('click');
+    expect(wrapper.find('form').exists()).toBe(true);
+    expect(wrapper.find('dialog.leave-dialog').exists()).toBe(false);
+    expect(wrapper.find('video').exists()).toBe(false);
+    expect(tracker.stop).toHaveBeenCalledOnce();
+    expect(resumed.close).toHaveBeenCalledOnce();
     wrapper.unmount();
 });

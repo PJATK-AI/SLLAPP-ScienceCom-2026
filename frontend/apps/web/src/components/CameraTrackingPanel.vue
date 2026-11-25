@@ -5,14 +5,11 @@ import { useHandStream, type HandStreamSession } from '@/composables/hand-stream
 import BrainRaster from './BrainRaster.vue';
 
 const props = defineProps<HandStreamSession>();
-const emit = defineEmits<{ active: [value: boolean] }>();
+const emit = defineEmits<{ active: [value: boolean]; cameraReady: [value: boolean] }>();
 const video = useTemplateRef<HTMLVideoElement>('video');
 const { crop } = useCameraSettings();
-const { hand, start, stop, isRunning, error, frameError, configurationError } = useHandStream(
-    video,
-    props,
-    crop,
-);
+const { hand, start, stop, isRunning, hasProcessedFrame, error, frameError, configurationError } =
+    useHandStream(video, props, crop);
 // The tracker detects hands in the crop and gives landmarks relative to it, so the preview shows
 // the same crop: the video is enlarged and moved so that the crop fills the frame.
 const videoStyle = computed(() => {
@@ -82,7 +79,11 @@ const boneLines = computed(() => {
 });
 
 watch(isRunning, (value) => emit('active', value), { flush: 'sync' });
-onScopeDispose(() => emit('active', false));
+watch(hasProcessedFrame, (value) => emit('cameraReady', value), { flush: 'sync' });
+onScopeDispose(() => {
+    emit('active', false);
+    emit('cameraReady', false);
+});
 </script>
 
 <template>
@@ -134,7 +135,10 @@ onScopeDispose(() => emit('active', false));
                         </svg>
                         To {{ otherHandName }} dłoń. Pokaż {{ handName }}.
                     </p>
-                    <p v-else-if="ready && isRunning && !hand" class="chip" role="status">
+                    <p v-else-if="isRunning && !hasProcessedFrame" class="chip" role="status">
+                        Uruchamianie kamery…
+                    </p>
+                    <p v-else-if="ready && hasProcessedFrame && !hand" class="chip" role="status">
                         Pokaż {{ handName }} dłoń
                     </p>
                 </div>

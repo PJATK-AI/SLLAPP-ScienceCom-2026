@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 import { useGameSession } from '@/composables/game-session';
 import type { SelectedHand } from '@/models';
 import BrainRaster from './BrainRaster.vue';
@@ -12,6 +12,7 @@ import { randomNickname } from './random-nickname';
 
 const diagnosticMode = import.meta.env.DEV && import.meta.env.MODE === 'diagnostics';
 const cameraActive = ref(false);
+const cameraReady = ref(false);
 const nickname = ref('');
 const selectedHand = ref<SelectedHand>('RIGHT');
 const nicknameInput = ref<HTMLInputElement | null>(null);
@@ -27,6 +28,7 @@ const {
     createSession,
     confirmNicknameReuse,
     dismissNicknameConfirmation,
+    dismissError,
     startGame,
     reconnect,
     resetSession,
@@ -34,7 +36,27 @@ const {
     sendNoHand,
 } = session;
 
+const nicknameRejected = computed(
+    () =>
+        !gameState.value &&
+        error.value?.source === 'server' &&
+        error.value.code === 'INVALID_SESSION',
+);
 watch([nickname, selectedHand], dismissNicknameConfirmation, { flush: 'sync' });
+watch(
+    nickname,
+    () => {
+        if (nicknameRejected.value) dismissError();
+    },
+    { flush: 'sync' },
+);
+watch(
+    nicknameRejected,
+    (rejected) => {
+        if (rejected) nicknameInput.value?.focus();
+    },
+    { flush: 'post' },
+);
 watch(
     nicknameConfirmation,
     (confirmation) => {
@@ -46,6 +68,42 @@ function changeNickname() {
     dismissNicknameConfirmation();
     nicknameInput.value?.focus();
 }
+
+const startableSessionId = computed(() =>
+    isReady.value &&
+    cameraReady.value &&
+    pendingAction.value === null &&
+    gameState.value?.status === 'CREATED'
+        ? gameState.value.sessionId
+        : null,
+);
+const countdown = ref<number | null>(null);
+let countdownTimer: ReturnType<typeof setInterval> | undefined;
+
+function cancelCountdown() {
+    clearInterval(countdownTimer);
+    countdownTimer = undefined;
+    countdown.value = null;
+}
+
+function beginCountdown() {
+    const sessionId = startableSessionId.value;
+    if (!sessionId || countdown.value !== null) return;
+
+    countdown.value = 3;
+    countdownTimer = setInterval(() => {
+        if (countdown.value === null) return;
+        if (countdown.value > 1) {
+            countdown.value--;
+            return;
+        }
+        cancelCountdown();
+        if (startableSessionId.value === sessionId) startGame();
+    }, 1000);
+}
+
+watch(startableSessionId, cancelCountdown, { flush: 'sync' });
+onScopeDispose(cancelCountdown);
 
 const running = computed(() => (gameState.value?.status === 'RUNNING' ? gameState.value : null));
 const remainingSeconds = ref(0);
@@ -81,13 +139,9 @@ const clock = computed(() => {
     const seconds = remainingSeconds.value % 60;
     return [minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
 });
-// There is no pause on the server: ending the game closes the session and returns to the start.
-const confirmEnd = ref(false);
-watch(running, (state) => {
-    if (!state) confirmEnd.value = false;
-});
-function endGame() {
-    confirmEnd.value = false;
+const leaveDialog = ref<HTMLDialogElement | null>(null);
+function leaveRound() {
+    leaveDialog.value?.close();
     resetSession();
 }
 const hint = computed(() => {
@@ -103,7 +157,7 @@ const connectionLost = computed(() => gameState.value && !isReady.value);
 const gameError = computed(() => {
     if (connectionLost.value || gameState.value?.status === 'FINISHED') return '';
     if (lastClose.value?.code === 1008) return 'Sesja wygasła. Utwórz nową sesję.';
-    if (error.value?.code === 'INVALID_SESSION') return 'Sprawdź nick i spróbuj ponownie.';
+    if (nicknameRejected.value) return '';
     if (error.value?.code === 'SESSION_STORAGE_UNAVAILABLE')
         return 'Nie udało się sprawdzić nicku. Spróbuj ponownie.';
     if (error.value?.code === 'INVALID_SAMPLE' || error.value?.code === 'GAME_FINISHED') return '';
@@ -161,7 +215,8 @@ const gameError = computed(() => {
                         <span class="accent" aria-hidden="true"></span>
                         <h2>Przeliteruj<br />słowo.</h2>
                         <p>
-                            Pokaż dłoń kamerze i zamigaj kolejne litery polskiego alfabetu migowego.
+                            Pokaż dłoń do kamery i zamigaj kolejne litery polskiego alfabetu
+                            migowego.
                         </p>
                         <slot name="setup-extra" />
                     </div>
@@ -180,6 +235,10 @@ const gameError = computed(() => {
                                     maxlength="20"
                                     autocomplete="off"
                                     spellcheck="false"
+                                    :aria-invalid="nicknameRejected || undefined"
+                                    :aria-describedby="
+                                        nicknameRejected ? 'nickname-error' : undefined
+                                    "
                                 />
                                 <button
                                     type="button"
@@ -195,6 +254,14 @@ const gameError = computed(() => {
                                     Losuj
                                 </button>
                             </div>
+                            <p
+                                v-if="nicknameRejected"
+                                id="nickname-error"
+                                class="nickname-error"
+                                role="alert"
+                            >
+                                Ten nick jest niedozwolony. Wpisz inny lub kliknij „Losuj”.
+                            </p>
                             <fieldset class="hands">
                                 <legend class="label">Wybierz dłoń.</legend>
                                 <div class="segmented">
@@ -263,13 +330,14 @@ const gameError = computed(() => {
                         :send-hand-sample="sendHandSample"
                         :send-no-hand="sendNoHand"
                         @active="cameraActive = $event"
+                        @camera-ready="cameraReady = $event"
                     >
                         <button
                             v-if="gameState.status === 'CREATED'"
                             type="button"
                             class="primary"
-                            :disabled="!isReady || !cameraActive || pendingAction !== null"
-                            @click="startGame"
+                            :disabled="!startableSessionId || countdown !== null"
+                            @click="beginCountdown"
                         >
                             {{ pendingAction === 'start' ? 'Rozpoczynanie…' : 'Rozpocznij rundę' }}
                         </button>
@@ -281,45 +349,55 @@ const gameError = computed(() => {
                         >
                             Wróć
                         </button>
-                        <template v-if="running">
-                            <button
-                                v-if="!confirmEnd"
-                                type="button"
-                                class="end-action"
-                                @click="confirmEnd = true"
-                            >
-                                Zakończ grę
-                            </button>
-                            <span
-                                v-else
-                                class="end-confirm"
-                                role="group"
-                                aria-label="Zakończyć grę?"
-                            >
-                                <span class="end-question">Zakończyć grę?</span>
-                                <button type="button" class="end-action danger" @click="endGame">
-                                    Tak, zakończ
-                                </button>
-                                <button
-                                    type="button"
-                                    class="end-action"
-                                    @click="confirmEnd = false"
-                                >
-                                    Graj dalej
-                                </button>
-                            </span>
-                        </template>
+                        <button
+                            v-if="running"
+                            type="button"
+                            class="end-action"
+                            aria-haspopup="dialog"
+                            @click="leaveDialog?.showModal()"
+                        >
+                            Opuść rundę
+                        </button>
                     </CameraTrackingPanel>
                 </div>
 
-                <div v-if="gameState.status === 'CREATED'" class="ready-copy">
-                    <span class="accent" aria-hidden="true"></span>
-                    <p class="label">{{ gameState.nickname }}</p>
-                    <h2>Gotowy?</h2>
-                    <p>
-                        Uruchom kamerę, pokaż {{ handName }} dłoń i rozpocznij rundę. Liczy się
-                        czas.
-                    </p>
+                <div
+                    v-if="gameState.status === 'CREATED'"
+                    class="ready-copy"
+                    :class="{ 'is-counting-down': countdown !== null }"
+                >
+                    <template v-if="countdown === null">
+                        <span class="accent" aria-hidden="true"></span>
+                        <p class="label">{{ gameState.nickname }}</p>
+                        <h2>Gotowy?</h2>
+                        <p>Uruchom kamerę, pokaż {{ handName }} dłoń i rozpocznij rundę.</p>
+                        <section class="round-rules" aria-labelledby="round-rules-title">
+                            <h3 id="round-rules-title" class="label">Zasady rundy</h3>
+                            <ul>
+                                <li>
+                                    <strong>Zamigaj podświetloną literę.</strong> Użyj wzoru i
+                                    przytrzymaj znak, aż gra go zaliczy.
+                                </li>
+                                <li>
+                                    <strong>Litera się powtarza?</strong> Wyjmij dłoń z kadru, a
+                                    potem pokaż znak ponownie.
+                                </li>
+                                <li>
+                                    <strong>Zbieraj punkty, zanim skończy się czas.</strong>
+                                    Dostajesz je za litery, a za całe słowo dochodzi premia.
+                                </li>
+                            </ul>
+                        </section>
+                    </template>
+                    <div class="countdown" role="status" aria-atomic="true">
+                        <div v-if="countdown !== null" class="countdown-orbit">
+                            <OrbitRing :progress="countdown / 3" :thickness="1.8" />
+                            <div :key="countdown" class="countdown-tick">
+                                <span class="countdown-number">{{ countdown }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <p v-if="countdown !== null">Przygotuj dłoń.</p>
                 </div>
 
                 <div v-if="running" class="hud">
@@ -375,6 +453,27 @@ const gameError = computed(() => {
                     </div>
                 </div>
             </div>
+            <dialog
+                v-if="running"
+                ref="leaveDialog"
+                class="leave-dialog"
+                aria-labelledby="leave-round-question"
+                aria-describedby="leave-round-description"
+            >
+                <h2 id="leave-round-question">Opuścić rundę?</h2>
+                <p id="leave-round-description">
+                    Wrócisz do ekranu startowego. Po upływie czasu rundy wynik trafi do rankingu,
+                    jeśli to pierwszy wynik pod tym nickiem lub poprawia zapisany rekord.
+                </p>
+                <div class="leave-actions">
+                    <button type="button" autofocus @click="leaveDialog?.close()">
+                        Graj dalej
+                    </button>
+                    <button type="button" class="leave-confirm" @click="leaveRound">
+                        Tak, opuść rundę
+                    </button>
+                </div>
+            </dialog>
         </section>
 
         <SessionDiagnostics
@@ -527,6 +626,14 @@ h2 {
 .nick-row input:focus-visible {
     outline-offset: 0;
 }
+.nick-row input[aria-invalid='true'] {
+    border-color: var(--error);
+}
+.nickname-error {
+    margin: 0;
+    color: var(--error);
+    font-size: clamp(1rem, 2vmin, 1.5rem);
+}
 .dice {
     display: flex;
     align-items: center;
@@ -639,6 +746,9 @@ h2 {
     gap: calc(var(--pad) * 0.9);
     min-height: 0;
 }
+.is-created .play {
+    overflow-y: auto;
+}
 .camera-area {
     align-self: stretch;
     min-height: 0;
@@ -649,8 +759,52 @@ h2 {
     gap: 0.8rem;
     justify-items: start;
 }
+.ready-copy.is-counting-down {
+    justify-items: center;
+    text-align: center;
+}
 .ready-copy h2 {
     font-size: clamp(2.2rem, 7vmin, 5.5rem);
+}
+.ready-copy:not(.is-counting-down) .countdown {
+    position: absolute;
+}
+.countdown-orbit {
+    --countdown-size: clamp(9rem, min(30vw, 52dvh), 26rem);
+    position: relative;
+    width: var(--countdown-size);
+    aspect-ratio: 1;
+}
+.countdown-tick {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+}
+.countdown-tick::before {
+    position: absolute;
+    inset: 9%;
+    border: 2px solid var(--red);
+    border-radius: 50%;
+    content: '';
+    animation: countdown-ripple 0.85s ease-out both;
+}
+.countdown-number {
+    color: var(--red);
+    font-family: var(--font-display);
+    font-size: calc(var(--countdown-size) * 0.68);
+    line-height: 1;
+    animation: pop 0.48s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes countdown-ripple {
+    from {
+        transform: scale(0.78);
+        opacity: 0.42;
+    }
+    to {
+        transform: scale(1.08);
+        opacity: 0;
+    }
 }
 .ready-copy p {
     margin: 0;
@@ -660,6 +814,31 @@ h2 {
 }
 .ready-copy p:not(.label) {
     color: var(--muted);
+}
+.round-rules {
+    width: 100%;
+    max-width: 42rem;
+    margin-top: calc(var(--pad) * 0.25);
+    padding-top: calc(var(--pad) * 0.55);
+    border-top: 1px solid var(--line);
+}
+.round-rules h3 {
+    margin: 0;
+}
+.round-rules ul {
+    display: grid;
+    gap: 0.55em;
+    margin: 0.7em 0 0;
+    padding-inline-start: 1.3em;
+    font-size: clamp(1rem, 2.35vmin, 1.7rem);
+    line-height: 1.4;
+    color: var(--muted);
+}
+.round-rules li::marker {
+    color: var(--red);
+}
+.round-rules strong {
+    color: var(--fg);
 }
 .disc-timer {
     font-family: var(--font-display);
@@ -825,21 +1004,47 @@ h2 {
     border-color: transparent;
     color: var(--muted);
 }
-.end-action.danger {
+.leave-dialog {
+    width: min(calc(100% - 2rem), 34rem);
+    max-height: 90dvh;
+    padding: clamp(1.25rem, 4vmin, 2rem);
+    border: 1px solid var(--glass-line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--fg);
+    box-shadow: var(--glass-shadow);
+}
+.leave-dialog[open] {
+    animation: leave-dialog-in 0.18s ease-out both;
+}
+.leave-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+}
+.leave-dialog h2 {
+    font-size: clamp(1.55rem, 4vmin, 2.6rem);
+}
+.leave-dialog p {
+    margin: 0.9rem 0 1.3rem;
+    color: var(--muted);
+    line-height: 1.5;
+}
+.leave-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.6rem;
+}
+.leave-confirm {
     border-color: var(--red);
     background: var(--red);
     color: #fff;
 }
-.end-confirm {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-}
-.end-question {
-    font-weight: 600;
-    font-size: clamp(0.95rem, 1.8vmin, 1.4rem);
+@keyframes leave-dialog-in {
+    from {
+        transform: translateY(0.35rem);
+        opacity: 0;
+    }
 }
 
 /* Result. */
@@ -906,9 +1111,11 @@ h2 {
         grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr);
     }
-    .hud,
-    .ready-copy {
+    .hud {
         align-self: center;
+    }
+    .ready-copy {
+        align-self: safe center;
     }
     .letter-row {
         --letter-size: clamp(8rem, min(17vw, 30dvh), 22rem);
@@ -925,6 +1132,13 @@ h2 {
 
 /* Portrait kiosk (e.g. a 32" screen on its side): size type by width, which is the short side. */
 @media (orientation: portrait) {
+    .is-created .play {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(13rem, 1fr) auto;
+    }
+    .countdown-orbit {
+        --countdown-size: clamp(9rem, min(54vw, 31dvh), 22rem);
+    }
     .setup {
         align-content: space-evenly;
     }
