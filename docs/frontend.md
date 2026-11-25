@@ -13,21 +13,29 @@ The source image is stored unchanged and licensed under
 ## Play a round
 
 1. Open the app on localhost or HTTPS. Enter a nickname, select the physical
-   hand and click **Zaczynamy**. If the nickname already has a ranking entry,
-   click **Kontynuuj** to play under that nickname or **Zmień nick** to enter
-   a different one.
-2. Click **Uruchom kamerę** and allow camera access. The preview draws the 21
-   landmarks of the selected hand in the original image coordinates. The points
-   disappear when that hand leaves the frame.
-3. Click **Rozpocznij rundę** once tracking starts. Sign the highlighted
-   letter. The reference beside the camera displays a crop of the current
-   letter from the Polish fingerspelling chart. When the same letter follows,
-   take your hand out of frame as prompted.
+   hand and click **Zaczynamy**. If the nickname is rejected, the form shows a
+   message next to the field. Edit the nickname or choose **Losuj** and try
+   again. If the nickname already has a ranking entry, click **Kontynuuj** to
+   play under that nickname or **Zmień nick** to enter a different one.
+2. Read **Zasady rundy** next to the camera preview. Click **Uruchom kamerę**
+   and allow camera access. The preview draws the 21 landmarks of the selected
+   hand in the original image coordinates. The points disappear when that hand
+   leaves the frame.
+3. Click **Rozpocznij rundę** once the tracker has processed its first camera
+   frame. An empty frame is enough. The round timer starts after a **3–2–1**
+   countdown, with the numbers displayed inside a red ring. Stopping the camera,
+   losing the connection or returning to the setup screen cancels the countdown.
+   Sign the highlighted letter using the Polish fingerspelling chart beside
+   the camera. When the same letter follows, take your hand out of frame as prompted.
 4. If the connection drops, click **Wznów sesję**. The server returns the
    current position, time and score, or the final result after the deadline.
 5. When the round ends, the camera stops. The score from that round stays
    visible while the ranking loads the best saved scores. Use **Ponów** to
-   retry the ranking or **Nowa sesja** to play again.
+   retry the ranking or **Nowa sesja** to play again. To leave a running round,
+   choose **Opuść rundę** and confirm in the dialog. Click **Graj dalej** or
+   press Escape to dismiss it. The round timer continues while the dialog is
+   open. The server considers the score for the ranking at the original round
+   deadline, using the best score per nickname.
 
 Use the regular backend with [prediction enabled](local-development.md#enable-prediction-on-the-regular-backend)
 to score gestures. The default sample rate is 10 Hz. The client skips intermediate

@@ -259,6 +259,22 @@ main {
 .brand .school-logo {
     height: clamp(2rem, 4.4vmin, 3.4rem);
 }
+@media (max-width: 42rem) {
+    main:has(.is-created) {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    main:has(.is-created) .app-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    main:has(.is-created) .school {
+        min-width: 0;
+    }
+    main:has(.is-created) .brand .school-logo {
+        max-width: 100%;
+        object-fit: contain;
+    }
+}
 @media (orientation: portrait) {
     .header-mark {
         font-size: clamp(1.8rem, 6.4vw, 4.6rem);

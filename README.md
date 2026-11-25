@@ -76,9 +76,11 @@ hand. Click **Zaczynamy**. If the nickname already has a ranking entry,
 choose **Kontynuuj** or **Zmień nick**. After the session opens, click
 **Uruchom kamerę**. To play, first [enable prediction on the regular
 backend](docs/local-development.md#enable-prediction-on-the-regular-backend).
-Click **Rozpocznij rundę**, then sign the highlighted letters using the hand
-reference beside the camera. The end screen shows the current round's score
-and the ranking, which keeps only the best result for each nickname.
+Click **Rozpocznij rundę** once the camera has processed its first frame.
+The round timer starts after a **3–2–1** countdown. Sign the highlighted
+letters using the hand reference beside the camera. The end screen shows
+the current round's score and the ranking, which keeps only the best result
+for each nickname.
 
 ## Prediction service
 

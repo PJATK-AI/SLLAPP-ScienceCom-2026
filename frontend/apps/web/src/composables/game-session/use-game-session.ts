@@ -267,6 +267,9 @@ export function useGameSession(
     function dismissNicknameConfirmation() {
         nicknameConfirmation.value = null;
     }
+    function dismissError() {
+        error.value = null;
+    }
     function reconnect() {
         if (gameState.value && gameState.value.status !== 'FINISHED')
             connect({ type: 'resume_session', sessionId: gameState.value.sessionId });
@@ -355,6 +358,7 @@ export function useGameSession(
         createSession,
         confirmNicknameReuse,
         dismissNicknameConfirmation,
+        dismissError,
         startGame,
         reconnect,
         disconnect,

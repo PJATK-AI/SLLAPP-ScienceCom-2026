@@ -44,10 +44,13 @@ function createFakeTracker() {
             return () => {};
         }),
         emitResult: (hand: Hand | null, timestamp = 0) => onResult(hand, timestamp),
+        emitError(error: HandTrackerError) {
+            tracker.isRunning = false;
+            onError(error);
+        },
         fail(error: HandTrackerError) {
             tracker.start.mockImplementationOnce(async () => {
-                tracker.isRunning = false;
-                onError(error);
+                tracker.emitError(error);
                 throw error;
             });
         },
@@ -104,6 +107,33 @@ describe('useHandTracker', () => {
         expect(isRunning.value).toBe(true);
     });
 
+    it('becomes ready on the first processed frame of each run, including an empty frame', async () => {
+        const { start, stop, isRunning, hasProcessedFrame, scope } = setup();
+        const starting = start();
+        expect(isRunning.value).toBe(true);
+        expect(hasProcessedFrame.value).toBe(false);
+
+        await starting;
+        expect(hasProcessedFrame.value).toBe(false);
+        tracker.emitResult(null);
+        expect(hasProcessedFrame.value).toBe(true);
+
+        stop();
+        tracker.emitResult(rightHand);
+        expect(hasProcessedFrame.value).toBe(false);
+        await start();
+        expect(hasProcessedFrame.value).toBe(false);
+        tracker.emitResult(rightHand);
+        expect(hasProcessedFrame.value).toBe(true);
+
+        tracker.emitError(new HandTrackerError('camera-unavailable', 'Camera ended.'));
+        expect(hasProcessedFrame.value).toBe(false);
+        await start();
+        tracker.emitResult(null);
+        scope.stop();
+        expect(hasProcessedFrame.value).toBe(false);
+    });
+
     it('updates hand for each result', async () => {
         const { start, hand } = setup();
         await start();
@@ -118,11 +148,12 @@ describe('useHandTracker', () => {
     it('stores the error and does not reject when the tracker fails', async () => {
         const failure = new HandTrackerError('camera-denied', 'Camera access was denied.');
         tracker.fail(failure);
-        const { start, error, isRunning } = setup();
+        const { start, error, isRunning, hasProcessedFrame } = setup();
 
         await expect(start()).resolves.toBeUndefined();
         expect(error.value).toBe(failure);
         expect(isRunning.value).toBe(false);
+        expect(hasProcessedFrame.value).toBe(false);
     });
 
     it('clears the previous error on start', async () => {
