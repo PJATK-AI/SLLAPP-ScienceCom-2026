@@ -1,11 +1,5 @@
 # SLLAPP na pokazie
 
-Na stanowisku bez internetu użyj gotowej paczki ZIP i pliku
-`Uruchom-gre.bat`. Instrukcję znajdziesz w `README.md` po rozpakowaniu.
-[Obsługa paczki offline](offline-quick-start.md) · [Przygotowanie wydania](offline-release.md)
-
-## Start z repozytorium
-
 Uruchamiaj polecenia z głównego katalogu projektu.
 
 | Polecenie | Co robi |

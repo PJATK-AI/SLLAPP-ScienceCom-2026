@@ -45,18 +45,3 @@ jobs:
           cache-dependency-path: model/requirements.txt
       - run: pip install -r model/requirements.txt
       - run: python -m unittest discover -s model/tests -t . -v
-
-  offline-package:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [backend, frontend, model]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash scripts/package-offline.sh "$GITHUB_SHA" linux/amd64 dist/offline
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sllapp-offline-${{ github.sha }}-amd64
-          path: dist/offline/*.zip
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
